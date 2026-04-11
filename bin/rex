@@ -83,9 +83,17 @@ case "$cmd" in
         load_project_dir
         exec "$PYTHON" "$INSTALL_DIR/rex_job.py" "$@"
         ;;
-    notify|jobs|cron)
+    notify)
         load_project_dir
-        exec "$PYTHON" "$INSTALL_DIR/agent_tool.py" "$cmd" "$@"
+        exec "$PYTHON" "$INSTALL_DIR/rex_notify.py" "$@"
+        ;;
+    jobs)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/rex_jobs.py" "$@"
+        ;;
+    cron)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/rex_cron.py" "$@"
         ;;
     help|-h|--help)
         usage

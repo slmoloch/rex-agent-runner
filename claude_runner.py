@@ -38,8 +38,15 @@ def _find_claude() -> str:
 
 CLAUDE_BIN = _find_claude()
 
+REX_PROMPT_PATH = INSTALL_DIR / "rex_system_prompt.md"
 AGENT_PROMPT_PATH = Path(WORKDIR) / "AGENT.md"
-SYSTEM_PROMPT = AGENT_PROMPT_PATH.read_text().strip() if AGENT_PROMPT_PATH.exists() else ""
+
+_parts = []
+if REX_PROMPT_PATH.exists():
+    _parts.append(REX_PROMPT_PATH.read_text().strip())
+if AGENT_PROMPT_PATH.exists():
+    _parts.append(AGENT_PROMPT_PATH.read_text().strip())
+SYSTEM_PROMPT = "\n\n".join(_parts)
 
 
 def run_claude(
