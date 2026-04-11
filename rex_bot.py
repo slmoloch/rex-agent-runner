@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Telegram bot that runs Claude Code CLI as the backend.
 Also listens on a local HTTP port for job submissions."""
+from __future__ import annotations
 
 import asyncio
 import json
