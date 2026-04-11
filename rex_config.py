@@ -111,7 +111,7 @@ def _build_plist() -> dict:
         "StandardOutPath": str(LOG_DIR / "daemon.log"),
         "StandardErrorPath": str(LOG_DIR / "daemon.err.log"),
         "EnvironmentVariables": {
-            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
             "REX_PROJECT_DIR": str(BASE_DIR),
         },
     }
