@@ -15,7 +15,10 @@ try:
 except ImportError:
     SSL_CONTEXT = None
 
-BASE_DIR = Path(__file__).parent
+import os as _os
+
+INSTALL_DIR = Path(__file__).parent
+BASE_DIR = Path(_os.environ["REX_PROJECT_DIR"]) if "REX_PROJECT_DIR" in _os.environ else INSTALL_DIR
 CONFIG_PATH = BASE_DIR / "config.json"
 
 with open(CONFIG_PATH) as f:
@@ -25,8 +28,8 @@ TELEGRAM_TOKEN = CONFIG["telegram_bot_token"]
 CHAT_ID = CONFIG.get("telegram_chat_id", CONFIG["allowed_user_ids"][0])
 WORKDIR = str((BASE_DIR / CONFIG.get("workspace", "./workspace")).resolve())
 JOBS_DIR = Path(WORKDIR) / "jobs"
-VENV_PYTHON = str(BASE_DIR / "venv" / "bin" / "python")
-JOB_SCRIPT = str(BASE_DIR / "job.py")
+VENV_PYTHON = str(INSTALL_DIR / "venv" / "bin" / "python")
+JOB_SCRIPT = str(INSTALL_DIR / "rex_job.py")
 
 
 def telegram_send(message: str) -> None:
@@ -58,7 +61,7 @@ def cron_list() -> None:
         print("No crontab configured.")
         return
 
-    lines = [l for l in result.stdout.splitlines() if "job.py" in l]
+    lines = [l for l in result.stdout.splitlines() if "rex_job.py" in l]
     if not lines:
         print("No scheduled jobs found.")
         return
@@ -68,8 +71,8 @@ def cron_list() -> None:
         parts = line.split()
         schedule = " ".join(parts[:5])
         # Extract job name from the command
-        if "job.py" in line:
-            idx = line.index("job.py") + len("job.py")
+        if "rex_job.py" in line:
+            idx = line.index("rex_job.py") + len("rex_job.py")
             job_name = line[idx:].strip()
         else:
             job_name = "unknown"
@@ -91,7 +94,7 @@ def cron_create(schedule: str, job_name: str) -> None:
     existing = result.stdout if result.returncode == 0 else ""
 
     # Check if job already scheduled
-    if f"job.py {job_name}" in existing:
+    if f"rex_job.py {job_name}" in existing:
         print(f"Job '{job_name}' is already scheduled. Remove it first with: agent-tool cron remove {job_name}")
         return
 
@@ -116,7 +119,7 @@ def cron_remove(job_name: str) -> None:
         return
 
     lines = result.stdout.splitlines()
-    filtered = [l for l in lines if f"job.py {job_name}" not in l]
+    filtered = [l for l in lines if f"rex_job.py {job_name}" not in l]
 
     if len(filtered) == len(lines):
         print(f"Job '{job_name}' not found in crontab.")

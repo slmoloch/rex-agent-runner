@@ -6,7 +6,10 @@ import sys
 import urllib.request
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
+import os
+
+INSTALL_DIR = Path(__file__).parent
+BASE_DIR = Path(os.environ["REX_PROJECT_DIR"]) if "REX_PROJECT_DIR" in os.environ else INSTALL_DIR
 CONFIG_PATH = BASE_DIR / "config.json"
 
 with open(CONFIG_PATH) as f:

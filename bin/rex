@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# rex - Claude Code Agent Runner
+set -euo pipefail
+
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
+PYTHON="$INSTALL_DIR/venv/bin/python"
+
+REX_CONFIG_DIR="$HOME/.config/rex"
+REX_PROJECT_FILE="$REX_CONFIG_DIR/project_dir"
+
+usage() {
+    cat <<'EOF'
+rex - Claude Code Agent Runner
+
+Usage: rex <command> [args]
+
+Setup:
+  init                         Initialize project in current directory
+
+Daemon:
+  start                        Start the bot daemon
+  stop                         Stop the bot daemon
+  status                       Check daemon status
+  logs [-f]                    Show daemon logs (-f to follow)
+
+Config:
+  config                       Show config and daemon status
+  config setup                 Interactive configuration
+
+Jobs:
+  job <name>                   Submit a job to the running bot
+  notify <message>             Send a Telegram notification
+  jobs list                    List available job files
+  cron list                    List scheduled jobs
+  cron create "<schedule>" <job>  Schedule a job
+  cron remove <job>            Remove a scheduled job
+EOF
+}
+
+# Load project dir (not required for init/help)
+load_project_dir() {
+    if [ ! -f "$REX_PROJECT_FILE" ]; then
+        echo "rex: not initialized. Run 'rex init' in your project directory." >&2
+        exit 1
+    fi
+    export REX_PROJECT_DIR
+    REX_PROJECT_DIR="$(cat "$REX_PROJECT_FILE")"
+    if [ ! -d "$REX_PROJECT_DIR" ]; then
+        echo "rex: project dir '$REX_PROJECT_DIR' not found. Run 'rex init' again." >&2
+        exit 1
+    fi
+}
+
+if [ $# -eq 0 ]; then
+    usage
+    exit 1
+fi
+
+cmd="$1"
+shift
+
+case "$cmd" in
+    init)
+        export REX_INSTALL_DIR="$INSTALL_DIR"
+        exec "$PYTHON" "$INSTALL_DIR/rex_init.py" "$@"
+        ;;
+    config)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/rex_config.py" "$@"
+        ;;
+    start|stop|status|logs)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/rex_config.py" "$cmd" "$@"
+        ;;
+    job)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/rex_job.py" "$@"
+        ;;
+    notify|jobs|cron)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/agent_tool.py" "$cmd" "$@"
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    *)
+        echo "rex: unknown command '$cmd'"
+        echo ""
+        usage
+        exit 1
+        ;;
+esac

@@ -2,12 +2,14 @@
 
 import json
 import logging
+import os
 import subprocess
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).parent
+INSTALL_DIR = Path(__file__).parent
+BASE_DIR = Path(os.environ["REX_PROJECT_DIR"]) if "REX_PROJECT_DIR" in os.environ else INSTALL_DIR
 CONFIG_PATH = BASE_DIR / "config.json"
 
 with open(CONFIG_PATH) as f:
