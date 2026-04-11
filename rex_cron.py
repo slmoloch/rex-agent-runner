@@ -49,7 +49,7 @@ def cron_create(schedule, job_name):
         print("Error: Job file not found: %s" % job_file, file=sys.stderr)
         sys.exit(1)
 
-    cron_line = "%s cd %s && %s %s %s >> %s/logs/%s.log 2>&1" % (
+    cron_line = "%s REX_PROJECT_DIR=%s %s %s %s >> %s/logs/%s.log 2>&1" % (
         schedule, BASE_DIR, VENV_PYTHON, JOB_SCRIPT, job_name, BASE_DIR, job_name,
     )
 
