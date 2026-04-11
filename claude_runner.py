@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -19,6 +20,24 @@ with open(CONFIG_PATH) as f:
 
 WORKDIR = str(Path(CONFIG.get("workspace", "./workspace")).resolve())
 
+def _find_claude() -> str:
+    if CONFIG.get("claude_bin"):
+        return CONFIG["claude_bin"]
+    found = shutil.which("claude")
+    if found:
+        return found
+    for path in [
+        Path.home() / ".local" / "bin" / "claude",
+        Path.home() / ".claude" / "local" / "claude",
+        Path("/usr/local/bin/claude"),
+        Path("/opt/homebrew/bin/claude"),
+    ]:
+        if path.exists():
+            return str(path)
+    return "claude"
+
+CLAUDE_BIN = _find_claude()
+
 AGENT_PROMPT_PATH = Path(WORKDIR) / "AGENT.md"
 SYSTEM_PROMPT = AGENT_PROMPT_PATH.read_text().strip() if AGENT_PROMPT_PATH.exists() else ""
 
@@ -31,7 +50,7 @@ def run_claude(
 ) -> tuple[str, str | None]:
     """Run claude CLI and return (response_text, session_id)."""
     cmd = [
-        "/Users/moloch/.local/bin/claude", "-p", prompt,
+        CLAUDE_BIN, "-p", prompt,
         "--output-format", "stream-json", "--verbose",
         "--dangerously-skip-permissions",
         "--disallowedTools", "CronCreate,CronDelete,CronList,TaskCreate,TaskGet,TaskList,TaskUpdate,TodoWrite",
