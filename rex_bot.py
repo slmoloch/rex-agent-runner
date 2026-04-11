@@ -209,10 +209,15 @@ async def run_http_server():
     logger.info("Job server listening on http://127.0.0.1:%d/job", JOB_PORT)
 
 
+async def post_init(application) -> None:
+    """Start the HTTP server after the telegram app initializes."""
+    await run_http_server()
+
+
 def main() -> None:
     global bot
 
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     bot = app.bot
 
     app.add_handler(CommandHandler("start", start))
@@ -220,11 +225,6 @@ def main() -> None:
     app.add_handler(CommandHandler("sessions", list_sessions))
     app.add_handler(CommandHandler("switch", switch_session))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Start HTTP server in the same event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(run_http_server())
 
     logger.info("Bot started.")
     app.run_polling(drop_pending_updates=True)
