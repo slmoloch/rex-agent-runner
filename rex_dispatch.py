@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""rex send - send a prompt to a session via the bot."""
+"""rex dispatch - dispatch a prompt to a session via the bot."""
 from __future__ import annotations
 
 import json
@@ -17,14 +17,14 @@ with open(BASE_DIR / "config.json") as f:
 JOB_PORT = CONFIG.get("job_port", 9821)
 
 
-def send(session: str, message: str) -> None:
+def dispatch(session: str, message: str) -> None:
     if session not in ("main", "new"):
         print("Error: session must be 'main' or 'new'.", file=sys.stderr)
         sys.exit(1)
 
     data = json.dumps({
         "prompt": message,
-        "job_name": "send:%s" % session,
+        "job_name": "dispatch:%s" % session,
         "session": session,
     }).encode()
     req = urllib.request.Request(
@@ -36,7 +36,7 @@ def send(session: str, message: str) -> None:
     try:
         with urllib.request.urlopen(req, timeout=620) as resp:
             result = json.loads(resp.read())
-            print("Sent to session '%s': %s" % (session, result.get("status", "unknown")))
+            print("Dispatched to session '%s': %s" % (session, result.get("status", "unknown")))
     except urllib.error.URLError as e:
         print("Error: Could not connect to bot. Is it running? (%s)" % e, file=sys.stderr)
         sys.exit(1)
@@ -44,9 +44,9 @@ def send(session: str, message: str) -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: rex send <session> <message>")
+        print("Usage: rex dispatch <session> <message>")
         print()
-        print("Send a prompt to a session via the bot.")
+        print("Dispatch a prompt to a session via the bot.")
         print()
         print("Sessions:")
         print("  main             The user-facing Telegram session")
@@ -55,4 +55,4 @@ if __name__ == "__main__":
 
     session = sys.argv[1]
     message = " ".join(sys.argv[2:])
-    send(session, message)
+    dispatch(session, message)

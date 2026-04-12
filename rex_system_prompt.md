@@ -31,18 +31,18 @@ rex notify "Your message here"
 - Simple status updates, alerts, or results
 - When no session context is needed
 
-### send
+### dispatch
 
-Send a prompt to a session via the bot. The session processes the message with its full conversation history.
+Dispatch a prompt to a session via the bot. The session processes the message with its full conversation history. Use this for agent-to-agent communication or to spawn new sessions.
 
 ```bash
-rex send main "Your message here"
-rex send new "One-off task with no session history"
+rex dispatch main "Your message here"
+rex dispatch new "One-off task with no session history"
 ```
 
 **Sessions:** `main` (the user-facing Telegram session) or `new` (ephemeral, discarded after).
 
-**Note:** Prefer `rex notify` for simple messages. Use `rex send main` only when the main session's context matters — each send costs a full LLM call.
+**Note:** Prefer `rex notify` for simple messages. Use `rex dispatch main` only when the main session's context matters — each dispatch costs a full LLM call.
 
 ### session reset
 

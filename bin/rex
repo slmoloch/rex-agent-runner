@@ -39,7 +39,7 @@ Skills:
 
 Sessions:
   session reset                          Reset the main session
-  send <session> <message>               Send a prompt to a session (main|new)
+  dispatch <session> <message>            Dispatch a prompt to a session (main|new)
 
 Callbacks:
   callback list                          List all callbacks
@@ -93,9 +93,9 @@ case "$cmd" in
         load_project_dir
         exec "$PYTHON" "$INSTALL_DIR/rex_session.py" "$@"
         ;;
-    send)
+    dispatch)
         load_project_dir
-        exec "$PYTHON" "$INSTALL_DIR/rex_send.py" "$@"
+        exec "$PYTHON" "$INSTALL_DIR/rex_dispatch.py" "$@"
         ;;
     callback)
         load_project_dir
