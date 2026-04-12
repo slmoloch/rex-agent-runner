@@ -8,72 +8,68 @@ You have a persistent memory file at MEMORY.md in your current working directory
 
 ## Rex CLI
 
-You have the `rex` command available for communicating with the user and managing jobs.
+You have the `rex` command available for communicating with the user and managing callbacks.
 
 ### notify
 
-Send a Telegram message to the user. Use this to inform, alert, or deliver results.
+Send a Telegram message to the user.
 
 ```bash
 rex notify "Your message here"
 ```
 
 **When to use:**
-- After completing a task or job
+- After completing a task or callback
 - To report errors or warnings
 - To send summaries, results, or status updates
-- Whenever the user should be informed of something
 
-**Tips:**
-- Keep messages concise and clear
-- Use Markdown formatting (bold: `*text*`, code: `` `text` ``)
+### callback list
 
-### jobs list
-
-List all available job files in `jobs/`.
+List all registered callbacks.
 
 ```bash
-rex jobs list
+rex callback list
 ```
 
-### cron list
+### callback create
 
-List all currently scheduled cron jobs.
+Create a callback — a prompt that runs on a schedule or at a specific time.
+
+**Recurring (cron schedule):**
+```bash
+rex callback create "<prompt>" --schedule "<cron>" [--name <id>]
+```
+
+**One-time (runs once then auto-removes):**
+```bash
+rex callback create "<prompt>" --at "<time>" [--name <id>]
+```
+
+**--at formats:**
+- `"HH:MM"` — today (or tomorrow if already passed)
+- `"YYYY-MM-DD HH:MM"` — specific date and time
+- `"+5m"` — 5 minutes from now
+- `"+2h"` — 2 hours from now
+
+**Examples:**
+```bash
+rex callback create "Check disk usage and notify me" --schedule "0 9 * * *" --name disk_check
+rex callback create "Remind me to check the deploy" --at "+30m" --name remind
+rex callback create "Send me a summary" --at "20:15" --name evening
+```
+
+### callback remove
+
+Remove a callback and its schedule.
 
 ```bash
-rex cron list
+rex callback remove <callback_id>
 ```
 
-### cron create
+## Heartbeat
 
-Schedule a job to run on a cron schedule. Requires a 5-field cron expression and a job name (matching a `.md` file in `jobs/`).
+A HEARTBEAT.md file in your workspace is executed automatically every 30 minutes within your current session. Use it for periodic checks, monitoring, or background tasks. Edit HEARTBEAT.md to change what runs on each heartbeat. Delete it to disable.
 
-```bash
-rex cron create "<cron_expression>" <job_name>
-```
+## Scheduling
 
-**Cron expression examples:**
-- `"0 9 * * *"` — Daily at 9am
-- `"0 * * * *"` — Every hour
-- `"0 9 * * 1-5"` — Weekdays at 9am
-
-### cron remove
-
-Remove a scheduled job from crontab.
-
-```bash
-rex cron remove <job_name>
-```
-
-### Creating new jobs
-
-To create and schedule a new job:
-
-1. Write a `.md` file in `jobs/` describing what the agent should do
-2. Schedule it with `rex cron create`
-
-Each job runs as a fresh Claude session. Always include "notify the user" in the job prompt if you want results sent via Telegram.
-
-## Scheduling & Jobs
-
-Do NOT use Remote Scheduled Agents, RemoteTrigger, or any Anthropic Cloud scheduling. They are not available to you. Use ONLY `rex` commands for scheduling.
+Do NOT use Remote Scheduled Agents, RemoteTrigger, or any Anthropic Cloud scheduling. They are not available to you. Use ONLY `rex callback` for scheduling.

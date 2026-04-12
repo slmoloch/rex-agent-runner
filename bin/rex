@@ -34,13 +34,12 @@ Config:
   config                       Show config and daemon status
   config setup                 Interactive configuration
 
-Jobs:
-  job <name>                   Submit a job to the running bot
-  notify <message>             Send a Telegram notification
-  jobs list                    List available job files
-  cron list                    List scheduled jobs
-  cron create "<schedule>" <job>  Schedule a job
-  cron remove <job>            Remove a scheduled job
+Callbacks:
+  callback list                          List all callbacks
+  callback create "<prompt>" [options]   Create a callback
+  callback execute <id>                  Execute a callback
+  callback remove <id>                   Remove a callback
+  notify <message>                       Send a Telegram notification
 EOF
 }
 
@@ -79,21 +78,13 @@ case "$cmd" in
         load_project_dir
         exec "$PYTHON" "$INSTALL_DIR/rex_config.py" "$cmd" "$@"
         ;;
-    job)
+    callback)
         load_project_dir
-        exec "$PYTHON" "$INSTALL_DIR/rex_job.py" "$@"
+        exec "$PYTHON" "$INSTALL_DIR/rex_callback.py" "$@"
         ;;
     notify)
         load_project_dir
         exec "$PYTHON" "$INSTALL_DIR/rex_notify.py" "$@"
-        ;;
-    jobs)
-        load_project_dir
-        exec "$PYTHON" "$INSTALL_DIR/rex_jobs.py" "$@"
-        ;;
-    cron)
-        load_project_dir
-        exec "$PYTHON" "$INSTALL_DIR/rex_cron.py" "$@"
         ;;
     help|-h|--help)
         usage

@@ -190,16 +190,20 @@ def cmd_status() -> None:
 
 
 def cmd_logs(follow: bool = False) -> None:
-    """Show daemon logs."""
-    log_file = LOG_DIR / "daemon.log"
-    if not log_file.exists():
+    """Show all logs (daemon, errors, jobs)."""
+    if not LOG_DIR.exists():
+        print("No logs yet.")
+        return
+
+    log_files = sorted(LOG_DIR.glob("*.log")) + sorted(LOG_DIR.glob("*.err.log"))
+    if not log_files:
         print("No logs yet.")
         return
 
     if follow:
-        subprocess.run(["tail", "-f", str(log_file)])
+        subprocess.run(["tail", "-f"] + [str(f) for f in log_files])
     else:
-        subprocess.run(["tail", "-50", str(log_file)])
+        subprocess.run(["tail", "-50"] + [str(f) for f in log_files])
 
 
 def usage() -> None:
