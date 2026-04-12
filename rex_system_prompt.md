@@ -21,16 +21,46 @@ You have the `rex` command available for communicating with the user and managin
 
 ### notify
 
-Send a Telegram message to the user.
+Send a Telegram message directly to the user. Does not go through any session.
 
 ```bash
 rex notify "Your message here"
 ```
 
 **When to use:**
-- After completing a task or callback
-- To report errors or warnings
-- To send summaries, results, or status updates
+- Simple status updates, alerts, or results
+- When no session context is needed
+
+### send
+
+Send a prompt to a named session via the bot. The receiving session processes the message with its full conversation history.
+
+```bash
+rex send <session> "Your message here"
+```
+
+**When to use:**
+- To route a message through the main session (e.g. `rex send main "..."`)
+- When the receiving session needs context to process the message
+- For inter-session communication (one callback talking to another)
+
+**Note:** Prefer `rex notify` for simple messages. Use `rex send` only when the receiving session's context matters — each send costs a full LLM call.
+
+### session list
+
+List all active sessions.
+
+```bash
+rex session list
+```
+
+### session reset
+
+Reset a session so it starts fresh on the next use.
+
+```bash
+rex session reset <name>
+```
 
 ### callback list
 
@@ -46,12 +76,12 @@ Create a callback — a prompt that runs on a schedule or at a specific time.
 
 **Recurring (cron schedule):**
 ```bash
-rex callback create "<prompt>" --schedule "<cron>" [--name <id>] [--command "<cmd>"]
+rex callback create "<prompt>" --schedule "<cron>" [--name <id>] [--session <target>] [--command "<cmd>"]
 ```
 
 **One-time (runs once then auto-removes):**
 ```bash
-rex callback create "<prompt>" --at "<time>" [--name <id>] [--command "<cmd>"]
+rex callback create "<prompt>" --at "<time>" [--name <id>] [--session <target>] [--command "<cmd>"]
 ```
 
 **--at formats:**
@@ -59,6 +89,15 @@ rex callback create "<prompt>" --at "<time>" [--name <id>] [--command "<cmd>"]
 - `"YYYY-MM-DD HH:MM"` — specific date and time
 - `"+5m"` — 5 minutes from now
 - `"+2h"` — 2 hours from now
+
+**--session (target session):**
+
+Controls which session the callback runs in:
+- **`main`** — runs in the user's main Telegram session.
+- **`new`** — creates a fresh ephemeral session each time (no memory between runs).
+- **`<name>`** — runs in a named persistent session (default: the callback's own name).
+
+By default, each callback gets its own named session, so it maintains continuity across runs without affecting other sessions.
 
 **--command (pre-check):**
 
@@ -69,8 +108,8 @@ Optional bash command that runs before the LLM prompt. This saves tokens by skip
 
 **Examples:**
 ```bash
-rex callback create "Check disk usage and notify me" --schedule "0 9 * * *" --name disk_check
-rex callback create "Remind me to check the deploy" --at "+30m" --name remind
+rex callback create "Check disk usage and notify me" --schedule "0 9 * * *" --name disk_check --session new
+rex callback create "Remind me to check the deploy" --at "+30m" --name remind --session main
 rex callback create "Summarize new emails" --schedule "*/15 * * * *" --name emails --command "check_inbox --count"
 ```
 

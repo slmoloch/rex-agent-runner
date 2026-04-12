@@ -16,6 +16,12 @@ from telegram.ext import (
     filters,
 )
 from claude_runner import CONFIG, WORKDIR, run_claude
+from rex_session import (
+    MAIN_SESSION,
+    get_session_id,
+    set_session_id,
+    reset_session,
+)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -29,9 +35,6 @@ TELEGRAM_TOKEN = CONFIG["telegram_bot_token"]
 ALLOWED_USER_IDS = set(CONFIG.get("allowed_user_ids", []))
 JOB_PORT = CONFIG.get("job_port", 9821)
 
-# Single session ID shared across chat and jobs
-session_id = None
-
 
 def is_authorized(update):
     user_id = update.effective_user.id
@@ -41,10 +44,21 @@ def is_authorized(update):
     return True
 
 
-def update_session(new_id):
-    global session_id
+def _run_in_session(prompt, session_name, timeout=600):
+    """Run a Claude prompt in the given named session.
+
+    session_name: "main", a custom name (persisted), or "new" (ephemeral).
+    Returns (response_text, session_name).
+    """
+    if session_name == "new":
+        response, _ = run_claude(prompt, session_id=None, timeout=timeout)
+        return response
+
+    session_id = get_session_id(session_name)
+    response, new_id = run_claude(prompt, session_id=session_id, timeout=timeout)
     if new_id:
-        session_id = new_id
+        set_session_id(session_name, new_id)
+    return response
 
 
 async def start(update, context):
@@ -60,8 +74,7 @@ async def start(update, context):
 async def new_conversation(update, context):
     if not is_authorized(update):
         return
-    global session_id
-    session_id = None
+    reset_session(MAIN_SESSION)
     await update.message.reply_text("Session reset. Send a message to start fresh.")
 
 
@@ -71,8 +84,10 @@ async def handle_message(update, context):
 
     await update.effective_chat.send_action("typing")
 
-    response, new_id = run_claude(update.message.text, session_id=session_id)
-    update_session(new_id)
+    loop = asyncio.get_event_loop()
+    response = await loop.run_in_executor(
+        None, lambda: _run_in_session(update.message.text, MAIN_SESSION, timeout=300)
+    )
 
     if len(response) <= 4096:
         await update.message.reply_text(response)
@@ -91,16 +106,16 @@ async def handle_job_request(request):
 
     prompt = data.get("prompt", "").strip()
     job_name = data.get("job_name", "unknown")
+    session_name = data.get("session", MAIN_SESSION)
     if not prompt:
         return web.json_response({"error": "prompt required"}, status=400)
 
-    logger.info("Job received: %s", job_name)
+    logger.info("Job received: %s (session: %s)", job_name, session_name)
 
     loop = asyncio.get_event_loop()
-    response, new_id = await loop.run_in_executor(
-        None, lambda: run_claude(prompt, session_id=session_id, timeout=600)
+    response = await loop.run_in_executor(
+        None, lambda: _run_in_session(prompt, session_name)
     )
-    update_session(new_id)
 
     logger.info("Job %s finished. Response: %s", job_name, response[:500])
     return web.json_response({"status": "ok", "response": response[:1000]})

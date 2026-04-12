@@ -37,6 +37,11 @@ Config:
 Skills:
   skills [list]                          List workspace skills
 
+Sessions:
+  session [list]                         List all sessions
+  session reset <name>                   Reset a session
+  send <session> <message>               Send a prompt to a named session
+
 Callbacks:
   callback list                          List all callbacks
   callback create "<prompt>" [options]   Create a callback
@@ -84,6 +89,14 @@ case "$cmd" in
     skills)
         load_project_dir
         exec "$PYTHON" "$INSTALL_DIR/rex_skills.py" "$@"
+        ;;
+    session)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/rex_session.py" "$@"
+        ;;
+    send)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/rex_send.py" "$@"
         ;;
     callback)
         load_project_dir
