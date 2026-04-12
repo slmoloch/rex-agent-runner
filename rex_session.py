@@ -56,13 +56,14 @@ def resolve_session_id(target: str) -> str | None:
 
     target: "main" resolves to the stored main session ID.
             "new" always returns None (fresh session).
+            Anything else is treated as a raw Claude session ID.
     """
     if target == "new":
         return None
     if target == MAIN_SESSION:
         return get_main_session_id()
-    # Unknown target treated as "new"
-    return None
+    # Raw session ID — pass through directly
+    return target
 
 
 def cmd_reset() -> None:

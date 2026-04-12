@@ -31,18 +31,30 @@ rex notify "Your message here"
 - Simple status updates, alerts, or results
 - When no session context is needed
 
-### send
+### dispatch
 
-Send a prompt to a session via the bot. The session processes the message with its full conversation history.
+Dispatch a prompt to a session via the bot. The target session processes the message with its full conversation history. Use this for agent-to-agent communication or to spawn new sessions.
 
 ```bash
-rex send main "Your message here"
-rex send new "One-off task with no session history"
+rex dispatch main "Your message here"
+rex dispatch new "One-off task with no session history"
+rex dispatch <session_id> "Report back to a specific session"
 ```
 
-**Sessions:** `main` (the user-facing Telegram session) or `new` (ephemeral, discarded after).
+**Targets:**
+- **`main`** — the user-facing Telegram session.
+- **`new`** — ephemeral session, discarded after.
+- **`<session_id>`** — a raw Claude session ID, for dispatching back to a specific caller session.
 
-**Note:** Prefer `rex notify` for simple messages. Use `rex send main` only when the main session's context matters — each send costs a full LLM call.
+**Note:** Prefer `rex notify` for simple messages. Each dispatch costs a full LLM call.
+
+**Delegating work:** Use `rex dispatch new` to spawn a session for heavy or independent work. Your session ID is automatically passed to the spawned session — it will receive instructions on how to dispatch results back to you. You do not need to include your session ID in the prompt.
+
+```bash
+rex dispatch new "Download the dataset, process it, and report back with a summary."
+```
+
+The spawned session will see your caller session ID and can use `rex dispatch <caller_id> "results"` to send results back to your session with full context.
 
 ### session reset
 
@@ -85,6 +97,7 @@ rex callback create "<prompt>" --at "<time>" [--name <id>] [--session <target>] 
 Controls which session the callback runs in:
 - **`main`** — runs in the user's main Telegram session.
 - **`new`** — creates a fresh ephemeral session each time (default).
+- **`<session_id>`** — a raw Claude session ID to resume.
 
 **--command (pre-check):**
 

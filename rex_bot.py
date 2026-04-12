@@ -52,8 +52,8 @@ def is_authorized(update):
 def _run_in_session(prompt, session_target, trigger, timeout=600):
     """Run a Claude prompt in the given session target and log the event.
 
-    session_target: "main" (persistent main session) or "new" (ephemeral).
-    trigger: source of the prompt (e.g. "telegram", "callback:name", "send").
+    session_target: "main" (persistent), "new" (ephemeral), or a raw session ID.
+    trigger: source of the prompt (e.g. "telegram", "callback:name", "dispatch").
     """
     session_id = resolve_session_id(session_target)
     result = run_claude(prompt, session_id=session_id, timeout=timeout)
@@ -123,8 +123,15 @@ async def handle_job_request(request):
     prompt = data.get("prompt", "").strip()
     job_name = data.get("job_name", "unknown")
     session_target = data.get("session", MAIN_SESSION)
+    caller_session = data.get("caller_session")
     if not prompt:
         return web.json_response({"error": "prompt required"}, status=400)
+
+    # Inject caller session ID so the target session can report back
+    if caller_session:
+        prompt = "%s\n\nCaller session ID: %s\nTo report results back to the caller, run: rex dispatch %s \"<your response>\"" % (
+            prompt, caller_session, caller_session,
+        )
 
     logger.info("Job received: %s (session: %s)", job_name, session_target)
 
