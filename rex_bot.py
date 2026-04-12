@@ -7,7 +7,6 @@ import asyncio
 import json
 import logging
 from aiohttp import web
-from pathlib import Path
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -30,7 +29,7 @@ TELEGRAM_TOKEN = CONFIG["telegram_bot_token"]
 ALLOWED_USER_IDS = set(CONFIG.get("allowed_user_ids", []))
 JOB_PORT = CONFIG.get("job_port", 9821)
 
-# Single session ID shared across chat, jobs, and heartbeat
+# Single session ID shared across chat and jobs
 session_id = None
 
 
@@ -117,35 +116,8 @@ async def run_http_server():
     logger.info("Job server listening on http://127.0.0.1:%d/job", JOB_PORT)
 
 
-# --- Heartbeat ---
-
-HEARTBEAT_PATH = Path(WORKDIR) / "HEARTBEAT.md"
-HEARTBEAT_INTERVAL = CONFIG.get("heartbeat_interval", 1800)
-
-
-async def heartbeat_loop():
-    while True:
-        await asyncio.sleep(HEARTBEAT_INTERVAL)
-        if not HEARTBEAT_PATH.exists():
-            continue
-        prompt = HEARTBEAT_PATH.read_text().strip()
-        if not prompt:
-            continue
-        logger.info("Heartbeat triggered")
-        loop = asyncio.get_event_loop()
-        try:
-            response, new_id = await loop.run_in_executor(
-                None, lambda: run_claude(prompt, session_id=session_id, timeout=600)
-            )
-            update_session(new_id)
-            logger.info("Heartbeat finished. Response: %s", response[:500])
-        except Exception as e:
-            logger.error("Heartbeat failed: %s", e)
-
-
 async def post_init(application):
     await run_http_server()
-    asyncio.ensure_future(heartbeat_loop())
 
 
 def main():
