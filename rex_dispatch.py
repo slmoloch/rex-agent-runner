@@ -18,10 +18,6 @@ JOB_PORT = CONFIG.get("job_port", 9821)
 
 
 def dispatch(session: str, message: str) -> None:
-    if session not in ("main", "new"):
-        print("Error: session must be 'main' or 'new'.", file=sys.stderr)
-        sys.exit(1)
-
     data = json.dumps({
         "prompt": message,
         "job_name": "dispatch:%s" % session,
@@ -51,6 +47,7 @@ if __name__ == "__main__":
         print("Sessions:")
         print("  main             The user-facing Telegram session")
         print("  new              Ephemeral session (discarded after)")
+        print("  <session_id>     A raw Claude session ID (for agent-to-agent callbacks)")
         sys.exit(1)
 
     session = sys.argv[1]

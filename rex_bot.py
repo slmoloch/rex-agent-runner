@@ -52,8 +52,8 @@ def is_authorized(update):
 def _run_in_session(prompt, session_target, trigger, timeout=600):
     """Run a Claude prompt in the given session target and log the event.
 
-    session_target: "main" (persistent main session) or "new" (ephemeral).
-    trigger: source of the prompt (e.g. "telegram", "callback:name", "send").
+    session_target: "main" (persistent), "new" (ephemeral), or a raw session ID.
+    trigger: source of the prompt (e.g. "telegram", "callback:name", "dispatch").
     """
     session_id = resolve_session_id(session_target)
     result = run_claude(prompt, session_id=session_id, timeout=timeout)

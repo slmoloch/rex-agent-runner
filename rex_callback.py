@@ -159,9 +159,6 @@ def cmd_create(prompt, schedule=None, at=None, name=None, command=None, session=
 
     if session is None:
         session = "new"
-    if session not in ("main", "new"):
-        print("Error: --session must be 'main' or 'new'.", file=sys.stderr)
-        sys.exit(1)
 
     if at:
         dt = _parse_at(at)

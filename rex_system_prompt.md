@@ -33,25 +33,28 @@ rex notify "Your message here"
 
 ### dispatch
 
-Dispatch a prompt to a session via the bot. The session processes the message with its full conversation history. Use this for agent-to-agent communication or to spawn new sessions.
+Dispatch a prompt to a session via the bot. The target session processes the message with its full conversation history. Use this for agent-to-agent communication or to spawn new sessions.
 
 ```bash
 rex dispatch main "Your message here"
 rex dispatch new "One-off task with no session history"
+rex dispatch <session_id> "Report back to a specific session"
 ```
 
-**Sessions:** `main` (the user-facing Telegram session) or `new` (ephemeral, discarded after).
+**Targets:**
+- **`main`** — the user-facing Telegram session.
+- **`new`** — ephemeral session, discarded after.
+- **`<session_id>`** — a raw Claude session ID, for dispatching back to a specific caller session.
 
-**Note:** Prefer `rex notify` for simple messages. Use `rex dispatch main` only when the main session's context matters — each dispatch costs a full LLM call.
+**Note:** Prefer `rex notify` for simple messages. Each dispatch costs a full LLM call.
 
-**Delegating work:** Use `rex dispatch new` to spawn a new session for a large or independent task. Include instructions in the prompt for how the spawned session should report back:
-- **Simple results:** tell it to use `rex notify` to message the user directly.
-- **Results needing context:** tell it to use `rex dispatch main` so the main session can process the results with full conversation history.
+**Delegating work with callbacks:** When spawning a secondary session to do heavy work, pass your own session ID in the prompt so the spawned session can report back to you:
 
-Example prompt for delegation:
+```bash
+rex dispatch new "Do the work described below. When done, report results back to the caller session using: rex dispatch <caller_session_id> \"<results>\""
 ```
-rex dispatch new "Download the dataset from <url>, process it, and notify the user with a summary using: rex notify \"<summary>\""
-```
+
+The spawned session runs independently, does the work, and dispatches its results back to the caller's session — where the caller receives them with full context of what it was doing.
 
 ### session reset
 
@@ -94,6 +97,7 @@ rex callback create "<prompt>" --at "<time>" [--name <id>] [--session <target>] 
 Controls which session the callback runs in:
 - **`main`** — runs in the user's main Telegram session.
 - **`new`** — creates a fresh ephemeral session each time (default).
+- **`<session_id>`** — a raw Claude session ID to resume.
 
 **--command (pre-check):**
 
