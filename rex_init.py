@@ -22,7 +22,12 @@ You have a persistent memory file at MEMORY.md in your current working directory
 
 ## Skills
 
-At the start of each conversation, read all `.md` files in the `skills/` directory. These files describe tools and capabilities available to you. Always follow the instructions in those files when using the corresponding tools.
+Workspace skills are `.md` files in the `skills/` directory. They are automatically loaded into your system prompt at the start of each session. Always follow the instructions in those files when using the corresponding tools.
+
+To list available skills from the CLI:
+```bash
+rex skills
+```
 
 ## Scheduling & Jobs
 

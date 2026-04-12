@@ -103,8 +103,13 @@ def cmd_list():
             timing = "recurring: %s" % cb.get("schedule", "?")
         else:
             timing = "once: %s" % cb.get("at", "?")
-        prompt_preview = cb.get("prompt", "")[:60]
-        print("  %s: [%s] %s" % (cid, timing, prompt_preview))
+        session = cb.get("session", cid)
+        prompt_preview = cb.get("prompt", "")[:50]
+        extras = []
+        if cb.get("command"):
+            extras.append("cmd: %s" % cb["command"][:30])
+        extra_str = " (%s)" % ", ".join(extras) if extras else ""
+        print("  %s: [%s] [session: %s] %s%s" % (cid, timing, session, prompt_preview, extra_str))
 
 
 def _parse_at(at_str):
@@ -144,7 +149,7 @@ def _parse_at(at_str):
         sys.exit(1)
 
 
-def cmd_create(prompt, schedule=None, at=None, name=None):
+def cmd_create(prompt, schedule=None, at=None, name=None, command=None, session=None):
     callbacks = _load_callbacks()
 
     callback_id = name or str(uuid.uuid4())[:8]
@@ -152,28 +157,46 @@ def cmd_create(prompt, schedule=None, at=None, name=None):
         print("Callback '%s' already exists." % callback_id, file=sys.stderr)
         sys.exit(1)
 
+    if session is None:
+        session = "new"
+    if session not in ("main", "new"):
+        print("Error: --session must be 'main' or 'new'.", file=sys.stderr)
+        sys.exit(1)
+
     if at:
         dt = _parse_at(at)
-        callbacks[callback_id] = {
+        cb = {
             "prompt": prompt,
             "recurring": False,
             "at": dt.strftime("%Y-%m-%d %H:%M"),
+            "session": session,
         }
+        if command:
+            cb["command"] = command
+        callbacks[callback_id] = cb
         _save_callbacks(callbacks)
         _schedule_at(callback_id, dt)
         print("Created one-time callback: %s (at %s)" % (callback_id, dt.strftime("%Y-%m-%d %H:%M")))
     elif schedule:
-        callbacks[callback_id] = {
+        cb = {
             "prompt": prompt,
             "recurring": True,
             "schedule": schedule,
+            "session": session,
         }
+        if command:
+            cb["command"] = command
+        callbacks[callback_id] = cb
         _save_callbacks(callbacks)
         _schedule_callback(callback_id, schedule)
         print("Created recurring callback: %s" % callback_id)
     else:
         print("Error: --schedule or --at is required.", file=sys.stderr)
         sys.exit(1)
+
+    print("  Session: %s" % session)
+    if command:
+        print("  Pre-check command: %s" % command)
 
 
 def cmd_execute(callback_id):
@@ -185,9 +208,37 @@ def cmd_execute(callback_id):
 
     cb = callbacks[callback_id]
     prompt = cb["prompt"]
+    command = cb.get("command")
+
+    # Run pre-check command if defined
+    if command:
+        print("Running pre-check: %s" % command)
+        try:
+            result = subprocess.run(
+                command, shell=True, capture_output=True, text=True,
+                cwd=WORKDIR, timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            print("Pre-check timed out, skipping callback.")
+            _cleanup_onetime(callbacks, cb, callback_id)
+            return
+
+        if result.returncode != 0:
+            print("Pre-check exited %d, skipping callback." % result.returncode)
+            _cleanup_onetime(callbacks, cb, callback_id)
+            return
+
+        # Append command output to the prompt
+        cmd_output = result.stdout.strip()
+        if cmd_output:
+            prompt = "%s\n\nPre-check command output:\n```\n%s\n```" % (prompt, cmd_output)
+            print("Pre-check passed, forwarding output to prompt.")
+        else:
+            print("Pre-check passed (no output).")
 
     # Submit to bot via HTTP
-    data = json.dumps({"prompt": prompt, "job_name": callback_id}).encode()
+    session = cb.get("session", "new")
+    data = json.dumps({"prompt": prompt, "job_name": callback_id, "session": session}).encode()
     req = urllib.request.Request(
         "http://127.0.0.1:%d/job" % JOB_PORT,
         data=data,
@@ -202,7 +253,11 @@ def cmd_execute(callback_id):
         print("Error: Could not connect to bot. Is it running? (%s)" % e, file=sys.stderr)
         sys.exit(1)
 
-    # Remove if one-time
+    _cleanup_onetime(callbacks, cb, callback_id)
+
+
+def _cleanup_onetime(callbacks, cb, callback_id):
+    """Remove one-time callbacks after execution or skip."""
     if not cb.get("recurring", False):
         del callbacks[callback_id]
         _save_callbacks(callbacks)
@@ -308,12 +363,19 @@ if __name__ == "__main__":
 
 Commands:
   list                                          List all callbacks
-  create "<prompt>" --schedule "<cron>" [--name <id>]
+  create "<prompt>" --schedule "<cron>" [options]
                                                 Create a recurring callback
-  create "<prompt>" --at "<time>" [--name <id>]
+  create "<prompt>" --at "<time>" [options]
                                                 Create a one-time callback
   execute <callback_id>                         Execute a callback
   remove <callback_id>                          Remove a callback
+
+Options:
+  --name <id>           Custom callback ID
+  --session <target>    Session to run in: "main" or "new" (default: new)
+  --command "<cmd>"     Bash command to run before the prompt. If it exits
+                        non-zero, the LLM call is skipped (saves tokens).
+                        If it exits 0, its stdout is appended to the prompt.
 
 --at formats: "HH:MM", "YYYY-MM-DD HH:MM", "+5m", "+2h" """)
         sys.exit(1)
@@ -325,12 +387,14 @@ Commands:
 
     elif cmd == "create":
         if len(sys.argv) < 3:
-            print('Usage: rex callback create "<prompt>" --schedule "<cron>" | --at "<time>" [--name <id>]')
+            print('Usage: rex callback create "<prompt>" --schedule "<cron>" | --at "<time>" [options]')
             sys.exit(1)
         prompt = sys.argv[2]
         schedule = None
         at = None
         name = None
+        command = None
+        session = None
         i = 3
         while i < len(sys.argv):
             if sys.argv[i] == "--schedule" and i + 1 < len(sys.argv):
@@ -342,6 +406,12 @@ Commands:
             elif sys.argv[i] == "--name" and i + 1 < len(sys.argv):
                 name = sys.argv[i + 1]
                 i += 2
+            elif sys.argv[i] == "--command" and i + 1 < len(sys.argv):
+                command = sys.argv[i + 1]
+                i += 2
+            elif sys.argv[i] == "--session" and i + 1 < len(sys.argv):
+                session = sys.argv[i + 1]
+                i += 2
             else:
                 i += 1
         if not schedule and not at:
@@ -350,7 +420,7 @@ Commands:
         if schedule and at:
             print("Error: use --schedule or --at, not both.", file=sys.stderr)
             sys.exit(1)
-        cmd_create(prompt, schedule=schedule, at=at, name=name)
+        cmd_create(prompt, schedule=schedule, at=at, name=name, command=command, session=session)
 
     elif cmd == "execute":
         if len(sys.argv) < 3:

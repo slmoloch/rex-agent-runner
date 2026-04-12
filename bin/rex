@@ -34,6 +34,13 @@ Config:
   config                       Show config and daemon status
   config setup                 Interactive configuration
 
+Skills:
+  skills [list]                          List workspace skills
+
+Sessions:
+  session reset                          Reset the main session
+  send <session> <message>               Send a prompt to a session (main|new)
+
 Callbacks:
   callback list                          List all callbacks
   callback create "<prompt>" [options]   Create a callback
@@ -77,6 +84,18 @@ case "$cmd" in
     start|stop|status|logs)
         load_project_dir
         exec "$PYTHON" "$INSTALL_DIR/rex_config.py" "$cmd" "$@"
+        ;;
+    skills)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/rex_skills.py" "$@"
+        ;;
+    session)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/rex_session.py" "$@"
+        ;;
+    send)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/rex_send.py" "$@"
         ;;
     callback)
         load_project_dir

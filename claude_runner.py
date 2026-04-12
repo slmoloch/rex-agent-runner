@@ -40,8 +40,27 @@ CLAUDE_BIN = _find_claude()
 
 REX_PROMPT_PATH = INSTALL_DIR / "rex_system_prompt.md"
 AGENT_PROMPT_PATH = Path(WORKDIR) / "AGENT.md"
+SKILLS_DIR = Path(WORKDIR) / "skills"
+
+
+def _load_skills_content() -> str:
+    """Load all .md files from the workspace skills/ directory."""
+    if not SKILLS_DIR.is_dir():
+        return ""
+    parts = []
+    for path in sorted(SKILLS_DIR.glob("*.md")):
+        content = path.read_text().strip()
+        if content:
+            parts.append(content)
+    if not parts:
+        return ""
+    return "## Workspace Skills\n\n" + "\n\n---\n\n".join(parts)
+
 
 _parts = []
+_skills = _load_skills_content()
+if _skills:
+    _parts.append(_skills)
 if REX_PROMPT_PATH.exists():
     _parts.append(REX_PROMPT_PATH.read_text().strip())
 if AGENT_PROMPT_PATH.exists():
@@ -54,8 +73,12 @@ def run_claude(
     session_id: str | None = None,
     system_prompt: str | None = None,
     timeout: int = 300,
-) -> tuple[str, str | None]:
-    """Run claude CLI and return (response_text, session_id)."""
+) -> dict:
+    """Run claude CLI and return a result dict.
+
+    Returns: {"response": str, "session_id": str|None,
+              "cost_usd": float, "duration_ms": int, "num_turns": int}
+    """
     cmd = [
         CLAUDE_BIN, "-p", prompt,
         "--output-format", "stream-json", "--verbose",
@@ -82,10 +105,18 @@ def run_claude(
         stderr = result.stderr.strip()
         stdout = result.stdout.strip()
         logger.error("claude exited %d: stderr=%s stdout=%s", result.returncode, stderr, stdout[:500])
-        return f"Error: {stderr or stdout or 'claude exited with code ' + str(result.returncode)}", session_id
+        error_msg = stderr or stdout or "claude exited with code %d" % result.returncode
+        return {
+            "response": "Error: %s" % error_msg,
+            "session_id": session_id,
+            "cost_usd": 0, "duration_ms": 0, "num_turns": 0,
+        }
 
     response_text = ""
     new_session_id = session_id
+    cost = 0
+    turns = 0
+    duration = 0
 
     for line in result.stdout.splitlines():
         if not line.strip():
@@ -115,4 +146,10 @@ def run_claude(
                     if text:
                         logger.info("Claude: %s", text[:300])
 
-    return response_text, new_session_id
+    return {
+        "response": response_text,
+        "session_id": new_session_id,
+        "cost_usd": cost,
+        "duration_ms": duration,
+        "num_turns": turns,
+    }

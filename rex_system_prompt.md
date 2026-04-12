@@ -1,3 +1,12 @@
+## Skills
+
+Workspace skills are loaded from `.md` files in the `skills/` directory and included at the beginning of this system prompt. Always follow the instructions described in each skill when using the corresponding tools.
+
+You can list available skills by running:
+```bash
+rex skills
+```
+
 ## Memory
 
 You have a persistent memory file at MEMORY.md in your current working directory. This is your ONLY memory system. Do NOT use any other memory system — no auto memory, no built-in memory, no project memory. Only MEMORY.md.
@@ -12,16 +21,36 @@ You have the `rex` command available for communicating with the user and managin
 
 ### notify
 
-Send a Telegram message to the user.
+Send a Telegram message directly to the user. Does not go through any session.
 
 ```bash
 rex notify "Your message here"
 ```
 
 **When to use:**
-- After completing a task or callback
-- To report errors or warnings
-- To send summaries, results, or status updates
+- Simple status updates, alerts, or results
+- When no session context is needed
+
+### send
+
+Send a prompt to a session via the bot. The session processes the message with its full conversation history.
+
+```bash
+rex send main "Your message here"
+rex send new "One-off task with no session history"
+```
+
+**Sessions:** `main` (the user-facing Telegram session) or `new` (ephemeral, discarded after).
+
+**Note:** Prefer `rex notify` for simple messages. Use `rex send main` only when the main session's context matters — each send costs a full LLM call.
+
+### session reset
+
+Reset the main session so it starts fresh on the next message.
+
+```bash
+rex session reset
+```
 
 ### callback list
 
@@ -37,12 +66,12 @@ Create a callback — a prompt that runs on a schedule or at a specific time.
 
 **Recurring (cron schedule):**
 ```bash
-rex callback create "<prompt>" --schedule "<cron>" [--name <id>]
+rex callback create "<prompt>" --schedule "<cron>" [--name <id>] [--session <target>] [--command "<cmd>"]
 ```
 
 **One-time (runs once then auto-removes):**
 ```bash
-rex callback create "<prompt>" --at "<time>" [--name <id>]
+rex callback create "<prompt>" --at "<time>" [--name <id>] [--session <target>] [--command "<cmd>"]
 ```
 
 **--at formats:**
@@ -51,11 +80,24 @@ rex callback create "<prompt>" --at "<time>" [--name <id>]
 - `"+5m"` — 5 minutes from now
 - `"+2h"` — 2 hours from now
 
+**--session (target session):**
+
+Controls which session the callback runs in:
+- **`main`** — runs in the user's main Telegram session.
+- **`new`** — creates a fresh ephemeral session each time (default).
+
+**--command (pre-check):**
+
+Optional bash command that runs before the LLM prompt. This saves tokens by skipping the LLM call when there's nothing to act on.
+
+- If the command exits **0**: the callback proceeds and the command's stdout is appended to the prompt.
+- If the command exits **non-zero**: the LLM call is skipped entirely.
+
 **Examples:**
 ```bash
-rex callback create "Check disk usage and notify me" --schedule "0 9 * * *" --name disk_check
-rex callback create "Remind me to check the deploy" --at "+30m" --name remind
-rex callback create "Send me a summary" --at "20:15" --name evening
+rex callback create "Check disk usage and notify me" --schedule "0 9 * * *" --name disk_check --session new
+rex callback create "Remind me to check the deploy" --at "+30m" --name remind --session main
+rex callback create "Summarize new emails" --schedule "*/15 * * * *" --name emails --command "check_inbox --count"
 ```
 
 ### callback remove
@@ -65,10 +107,6 @@ Remove a callback and its schedule.
 ```bash
 rex callback remove <callback_id>
 ```
-
-## Heartbeat
-
-A HEARTBEAT.md file in your workspace is executed automatically every 30 minutes within your current session. Use it for periodic checks, monitoring, or background tasks. Edit HEARTBEAT.md to change what runs on each heartbeat. Delete it to disable.
 
 ## Scheduling
 
