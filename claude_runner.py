@@ -73,8 +73,12 @@ def run_claude(
     session_id: str | None = None,
     system_prompt: str | None = None,
     timeout: int = 300,
-) -> tuple[str, str | None]:
-    """Run claude CLI and return (response_text, session_id)."""
+) -> dict:
+    """Run claude CLI and return a result dict.
+
+    Returns: {"response": str, "session_id": str|None,
+              "cost_usd": float, "duration_ms": int, "num_turns": int}
+    """
     cmd = [
         CLAUDE_BIN, "-p", prompt,
         "--output-format", "stream-json", "--verbose",
@@ -101,10 +105,18 @@ def run_claude(
         stderr = result.stderr.strip()
         stdout = result.stdout.strip()
         logger.error("claude exited %d: stderr=%s stdout=%s", result.returncode, stderr, stdout[:500])
-        return f"Error: {stderr or stdout or 'claude exited with code ' + str(result.returncode)}", session_id
+        error_msg = stderr or stdout or "claude exited with code %d" % result.returncode
+        return {
+            "response": "Error: %s" % error_msg,
+            "session_id": session_id,
+            "cost_usd": 0, "duration_ms": 0, "num_turns": 0,
+        }
 
     response_text = ""
     new_session_id = session_id
+    cost = 0
+    turns = 0
+    duration = 0
 
     for line in result.stdout.splitlines():
         if not line.strip():
@@ -134,4 +146,10 @@ def run_claude(
                     if text:
                         logger.info("Claude: %s", text[:300])
 
-    return response_text, new_session_id
+    return {
+        "response": response_text,
+        "session_id": new_session_id,
+        "cost_usd": cost,
+        "duration_ms": duration,
+        "num_turns": turns,
+    }
