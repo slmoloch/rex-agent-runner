@@ -34,6 +34,9 @@ Config:
   config                       Show config and daemon status
   config setup                 Interactive configuration
 
+Skills:
+  skills [list]                          List workspace skills
+
 Callbacks:
   callback list                          List all callbacks
   callback create "<prompt>" [options]   Create a callback
@@ -77,6 +80,10 @@ case "$cmd" in
     start|stop|status|logs)
         load_project_dir
         exec "$PYTHON" "$INSTALL_DIR/rex_config.py" "$cmd" "$@"
+        ;;
+    skills)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/rex_skills.py" "$@"
         ;;
     callback)
         load_project_dir

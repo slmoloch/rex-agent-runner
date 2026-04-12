@@ -40,8 +40,27 @@ CLAUDE_BIN = _find_claude()
 
 REX_PROMPT_PATH = INSTALL_DIR / "rex_system_prompt.md"
 AGENT_PROMPT_PATH = Path(WORKDIR) / "AGENT.md"
+SKILLS_DIR = Path(WORKDIR) / "skills"
+
+
+def _load_skills_content() -> str:
+    """Load all .md files from the workspace skills/ directory."""
+    if not SKILLS_DIR.is_dir():
+        return ""
+    parts = []
+    for path in sorted(SKILLS_DIR.glob("*.md")):
+        content = path.read_text().strip()
+        if content:
+            parts.append(content)
+    if not parts:
+        return ""
+    return "## Workspace Skills\n\n" + "\n\n---\n\n".join(parts)
+
 
 _parts = []
+_skills = _load_skills_content()
+if _skills:
+    _parts.append(_skills)
 if REX_PROMPT_PATH.exists():
     _parts.append(REX_PROMPT_PATH.read_text().strip())
 if AGENT_PROMPT_PATH.exists():
