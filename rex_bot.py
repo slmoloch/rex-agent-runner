@@ -123,8 +123,15 @@ async def handle_job_request(request):
     prompt = data.get("prompt", "").strip()
     job_name = data.get("job_name", "unknown")
     session_target = data.get("session", MAIN_SESSION)
+    caller_session = data.get("caller_session")
     if not prompt:
         return web.json_response({"error": "prompt required"}, status=400)
+
+    # Inject caller session ID so the target session can report back
+    if caller_session:
+        prompt = "%s\n\nCaller session ID: %s\nTo report results back to the caller, run: rex dispatch %s \"<your response>\"" % (
+            prompt, caller_session, caller_session,
+        )
 
     logger.info("Job received: %s (session: %s)", job_name, session_target)
 

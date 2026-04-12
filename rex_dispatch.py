@@ -18,11 +18,16 @@ JOB_PORT = CONFIG.get("job_port", 9821)
 
 
 def dispatch(session: str, message: str) -> None:
-    data = json.dumps({
+    payload = {
         "prompt": message,
         "job_name": "dispatch:%s" % session,
         "session": session,
-    }).encode()
+    }
+    caller_session = os.environ.get("REX_SESSION_ID")
+    if caller_session:
+        payload["caller_session"] = caller_session
+
+    data = json.dumps(payload).encode()
     req = urllib.request.Request(
         "http://127.0.0.1:%d/job" % JOB_PORT,
         data=data,

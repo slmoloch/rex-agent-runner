@@ -48,13 +48,13 @@ rex dispatch <session_id> "Report back to a specific session"
 
 **Note:** Prefer `rex notify` for simple messages. Each dispatch costs a full LLM call.
 
-**Delegating work with callbacks:** When spawning a secondary session to do heavy work, pass your own session ID in the prompt so the spawned session can report back to you:
+**Delegating work:** Use `rex dispatch new` to spawn a session for heavy or independent work. Your session ID is automatically passed to the spawned session — it will receive instructions on how to dispatch results back to you. You do not need to include your session ID in the prompt.
 
 ```bash
-rex dispatch new "Do the work described below. When done, report results back to the caller session using: rex dispatch <caller_session_id> \"<results>\""
+rex dispatch new "Download the dataset, process it, and report back with a summary."
 ```
 
-The spawned session runs independently, does the work, and dispatches its results back to the caller's session — where the caller receives them with full context of what it was doing.
+The spawned session will see your caller session ID and can use `rex dispatch <caller_id> "results"` to send results back to your session with full context.
 
 ### session reset
 

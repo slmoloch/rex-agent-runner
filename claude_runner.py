@@ -93,12 +93,17 @@ def run_claude(
 
     logger.info("Prompt: %s", prompt[:200])
 
+    env = os.environ.copy()
+    if session_id:
+        env["REX_SESSION_ID"] = session_id
+
     result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         cwd=WORKDIR,
         timeout=timeout,
+        env=env,
     )
 
     if result.returncode != 0:
