@@ -157,9 +157,11 @@ def cmd_create(prompt, schedule=None, at=None, name=None, command=None, session=
         print("Callback '%s' already exists." % callback_id, file=sys.stderr)
         sys.exit(1)
 
-    # Default session: use the callback's own name as its session
     if session is None:
-        session = callback_id
+        session = "new"
+    if session not in ("main", "new"):
+        print("Error: --session must be 'main' or 'new'.", file=sys.stderr)
+        sys.exit(1)
 
     if at:
         dt = _parse_at(at)
@@ -235,7 +237,7 @@ def cmd_execute(callback_id):
             print("Pre-check passed (no output).")
 
     # Submit to bot via HTTP
-    session = cb.get("session", callback_id)
+    session = cb.get("session", "new")
     data = json.dumps({"prompt": prompt, "job_name": callback_id, "session": session}).encode()
     req = urllib.request.Request(
         "http://127.0.0.1:%d/job" % JOB_PORT,
@@ -370,8 +372,7 @@ Commands:
 
 Options:
   --name <id>           Custom callback ID
-  --session <target>    Session to run in: "main", "new", or a custom name
-                        (default: callback's own name — each gets its own session)
+  --session <target>    Session to run in: "main" or "new" (default: new)
   --command "<cmd>"     Bash command to run before the prompt. If it exits
                         non-zero, the LLM call is skipped (saves tokens).
                         If it exits 0, its stdout is appended to the prompt.

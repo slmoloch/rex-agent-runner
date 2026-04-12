@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""rex session - manage persistent Claude sessions."""
+"""rex session - manage the main Claude session."""
 from __future__ import annotations
 
 import json
@@ -19,91 +19,75 @@ SESSIONS_FILE = WORKDIR / "sessions.json"
 MAIN_SESSION = "main"
 
 
-def load_sessions() -> dict:
+def _load() -> dict:
     if SESSIONS_FILE.exists():
         with open(SESSIONS_FILE) as f:
             return json.load(f)
     return {}
 
 
-def save_sessions(sessions: dict) -> None:
+def _save(data: dict) -> None:
     with open(SESSIONS_FILE, "w") as f:
-        json.dump(sessions, f, indent=2)
+        json.dump(data, f, indent=2)
         f.write("\n")
 
 
-def get_session_id(name: str) -> str | None:
-    """Get the Claude session ID for a named session. Returns None if not yet created."""
-    sessions = load_sessions()
-    return sessions.get(name)
+def get_main_session_id() -> str | None:
+    """Get the Claude session ID for the main session."""
+    return _load().get(MAIN_SESSION)
 
 
-def set_session_id(name: str, session_id: str) -> None:
-    """Store or update a Claude session ID for a named session."""
-    sessions = load_sessions()
-    sessions[name] = session_id
-    save_sessions(sessions)
+def set_main_session_id(session_id: str) -> None:
+    """Store the Claude session ID for the main session."""
+    data = _load()
+    data[MAIN_SESSION] = session_id
+    _save(data)
 
 
-def reset_session(name: str) -> None:
-    """Reset a session so it creates a fresh one on next use."""
-    sessions = load_sessions()
-    if name in sessions:
-        sessions[name] = None
-        save_sessions(sessions)
+def reset_main_session() -> None:
+    """Reset the main session so it starts fresh on next use."""
+    data = _load()
+    data[MAIN_SESSION] = None
+    _save(data)
 
 
-def delete_session(name: str) -> None:
-    """Remove a session entirely."""
-    sessions = load_sessions()
-    if name in sessions:
-        del sessions[name]
-        save_sessions(sessions)
+def resolve_session_id(target: str) -> str | None:
+    """Resolve a session target to a Claude session ID.
+
+    target: "main" resolves to the stored main session ID.
+            "new" always returns None (fresh session).
+    """
+    if target == "new":
+        return None
+    if target == MAIN_SESSION:
+        return get_main_session_id()
+    # Unknown target treated as "new"
+    return None
 
 
-def cmd_list() -> None:
-    sessions = load_sessions()
-    if not sessions:
-        print("No sessions.")
-        return
-
-    print("Sessions:")
-    for name, sid in sessions.items():
-        label = "(main) " if name == MAIN_SESSION else ""
-        status = sid[:16] + "..." if sid else "(new)"
-        print("  %-20s %s%s" % (name, label, status))
-
-
-def cmd_reset(name: str) -> None:
-    sessions = load_sessions()
-    if name not in sessions:
-        print("Session '%s' not found." % name, file=sys.stderr)
-        sys.exit(1)
-    reset_session(name)
-    print("Session '%s' reset. Will start fresh on next use." % name)
+def cmd_reset() -> None:
+    reset_main_session()
+    print("Main session reset. Will start fresh on next message.")
 
 
 def usage() -> None:
     print("""Usage: rex session <command>
 
 Commands:
-  list                 List all sessions
-  reset <name>         Reset a session (starts fresh on next use)""")
+  reset          Reset the main session (starts fresh on next use)""")
 
 
 def main() -> None:
     args = sys.argv[1:]
-    cmd = args[0] if args else "list"
 
-    if cmd == "list":
-        cmd_list()
-    elif cmd == "reset":
-        if len(args) < 2:
-            print("Usage: rex session reset <name>")
-            sys.exit(1)
-        cmd_reset(args[1])
-    elif cmd in ("help", "-h", "--help"):
+    if not args or args[0] in ("help", "-h", "--help"):
         usage()
+        return
+
+    cmd = args[0]
+
+    if cmd == "reset":
+        cmd_reset()
     else:
         print("Unknown session command: %s" % cmd)
         usage()

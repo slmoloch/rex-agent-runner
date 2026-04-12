@@ -33,33 +33,23 @@ rex notify "Your message here"
 
 ### send
 
-Send a prompt to a named session via the bot. The receiving session processes the message with its full conversation history.
+Send a prompt to a session via the bot. The session processes the message with its full conversation history.
 
 ```bash
-rex send <session> "Your message here"
+rex send main "Your message here"
+rex send new "One-off task with no session history"
 ```
 
-**When to use:**
-- To route a message through the main session (e.g. `rex send main "..."`)
-- When the receiving session needs context to process the message
-- For inter-session communication (one callback talking to another)
+**Sessions:** `main` (the user-facing Telegram session) or `new` (ephemeral, discarded after).
 
-**Note:** Prefer `rex notify` for simple messages. Use `rex send` only when the receiving session's context matters — each send costs a full LLM call.
-
-### session list
-
-List all active sessions.
-
-```bash
-rex session list
-```
+**Note:** Prefer `rex notify` for simple messages. Use `rex send main` only when the main session's context matters — each send costs a full LLM call.
 
 ### session reset
 
-Reset a session so it starts fresh on the next use.
+Reset the main session so it starts fresh on the next message.
 
 ```bash
-rex session reset <name>
+rex session reset
 ```
 
 ### callback list
@@ -94,10 +84,7 @@ rex callback create "<prompt>" --at "<time>" [--name <id>] [--session <target>] 
 
 Controls which session the callback runs in:
 - **`main`** — runs in the user's main Telegram session.
-- **`new`** — creates a fresh ephemeral session each time (no memory between runs).
-- **`<name>`** — runs in a named persistent session (default: the callback's own name).
-
-By default, each callback gets its own named session, so it maintains continuity across runs without affecting other sessions.
+- **`new`** — creates a fresh ephemeral session each time (default).
 
 **--command (pre-check):**
 

@@ -18,9 +18,10 @@ from telegram.ext import (
 from claude_runner import CONFIG, WORKDIR, run_claude
 from rex_session import (
     MAIN_SESSION,
-    get_session_id,
-    set_session_id,
-    reset_session,
+    get_main_session_id,
+    set_main_session_id,
+    reset_main_session,
+    resolve_session_id,
 )
 
 logging.basicConfig(
@@ -44,20 +45,15 @@ def is_authorized(update):
     return True
 
 
-def _run_in_session(prompt, session_name, timeout=600):
-    """Run a Claude prompt in the given named session.
+def _run_in_session(prompt, session_target, timeout=600):
+    """Run a Claude prompt in the given session target.
 
-    session_name: "main", a custom name (persisted), or "new" (ephemeral).
-    Returns (response_text, session_name).
+    session_target: "main" (persistent main session) or "new" (ephemeral).
     """
-    if session_name == "new":
-        response, _ = run_claude(prompt, session_id=None, timeout=timeout)
-        return response
-
-    session_id = get_session_id(session_name)
+    session_id = resolve_session_id(session_target)
     response, new_id = run_claude(prompt, session_id=session_id, timeout=timeout)
-    if new_id:
-        set_session_id(session_name, new_id)
+    if session_target == MAIN_SESSION and new_id:
+        set_main_session_id(new_id)
     return response
 
 
@@ -74,7 +70,7 @@ async def start(update, context):
 async def new_conversation(update, context):
     if not is_authorized(update):
         return
-    reset_session(MAIN_SESSION)
+    reset_main_session()
     await update.message.reply_text("Session reset. Send a message to start fresh.")
 
 

@@ -38,9 +38,8 @@ Skills:
   skills [list]                          List workspace skills
 
 Sessions:
-  session [list]                         List all sessions
-  session reset <name>                   Reset a session
-  send <session> <message>               Send a prompt to a named session
+  session reset                          Reset the main session
+  send <session> <message>               Send a prompt to a session (main|new)
 
 Callbacks:
   callback list                          List all callbacks

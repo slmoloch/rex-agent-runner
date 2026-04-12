@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""rex send - send a prompt to a named session via the bot."""
+"""rex send - send a prompt to a session via the bot."""
 from __future__ import annotations
 
 import json
@@ -18,6 +18,10 @@ JOB_PORT = CONFIG.get("job_port", 9821)
 
 
 def send(session: str, message: str) -> None:
+    if session not in ("main", "new"):
+        print("Error: session must be 'main' or 'new'.", file=sys.stderr)
+        sys.exit(1)
+
     data = json.dumps({
         "prompt": message,
         "job_name": "send:%s" % session,
@@ -42,11 +46,10 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: rex send <session> <message>")
         print()
-        print("Send a prompt to a named session via the bot.")
+        print("Send a prompt to a session via the bot.")
         print()
         print("Sessions:")
         print("  main             The user-facing Telegram session")
-        print("  <name>           Any named session (e.g. a callback's session)")
         print("  new              Ephemeral session (discarded after)")
         sys.exit(1)
 
