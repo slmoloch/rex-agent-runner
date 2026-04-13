@@ -23,8 +23,10 @@ from rex_session import (
     set_main_session_id,
     reset_main_session,
     resolve_session_id,
+    register_session,
 )
 from rex_events import append_event, load_events
+from rex_gc import mark_running, mark_stopped, run_gc_loop
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -49,28 +51,46 @@ def is_authorized(update):
     return True
 
 
-def _run_in_session(prompt, session_target, trigger, timeout=600):
+def _run_in_session(prompt, session_target, trigger, timeout=600, caller_session=None):
     """Run a Claude prompt in the given session target and log the event.
 
     session_target: "main" (persistent), "new" (ephemeral), or a raw session ID.
     trigger: source of the prompt (e.g. "telegram", "callback:name", "dispatch").
+    caller_session: session ID of the caller (for dispatch tracking).
     """
     session_id = resolve_session_id(session_target)
-    result = run_claude(prompt, session_id=session_id, timeout=timeout)
 
-    if session_target == MAIN_SESSION and result["session_id"]:
-        set_main_session_id(result["session_id"])
+    if session_id:
+        mark_running(session_id)
+    try:
+        result = run_claude(prompt, session_id=session_id, timeout=timeout)
+    finally:
+        if session_id:
+            mark_stopped(session_id)
 
-    append_event({
+    new_session_id = result["session_id"]
+
+    if session_target == MAIN_SESSION and new_session_id:
+        set_main_session_id(new_session_id)
+
+    # Register the session so the GC can track it.
+    if new_session_id:
+        name = session_target if session_target == MAIN_SESSION else None
+        register_session(new_session_id, name=name)
+
+    event = {
         "session": session_target,
-        "session_id": result["session_id"],
+        "session_id": new_session_id,
         "trigger": trigger,
         "prompt_preview": prompt[:200],
         "response_preview": result["response"][:500],
         "cost_usd": result["cost_usd"],
         "duration_ms": result["duration_ms"],
         "num_turns": result["num_turns"],
-    })
+    }
+    if caller_session:
+        event["caller_session"] = caller_session
+    append_event(event)
 
     return result["response"]
 
@@ -137,7 +157,10 @@ async def handle_job_request(request):
 
     loop = asyncio.get_event_loop()
     response = await loop.run_in_executor(
-        None, lambda: _run_in_session(prompt, session_target, trigger=job_name)
+        None, lambda: _run_in_session(
+            prompt, session_target, trigger=job_name,
+            caller_session=caller_session,
+        )
     )
 
     logger.info("Job %s finished. Response: %s", job_name, response[:500])
@@ -170,6 +193,7 @@ async def run_http_server():
 
 async def post_init(application):
     await run_http_server()
+    asyncio.create_task(run_gc_loop())
 
 
 def main():
