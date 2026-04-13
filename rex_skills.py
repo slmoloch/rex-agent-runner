@@ -22,12 +22,19 @@ SKILLS_DIR = WORKDIR / "skills"
 def _extract_description(content: str) -> str:
     """Extract description from a skill markdown file.
 
+    Skips YAML front matter (between --- delimiters).
     Uses the first non-heading, non-empty paragraph line as description.
     Falls back to the first heading text if no paragraph found.
     """
     heading = ""
+    in_frontmatter = False
     for line in content.splitlines():
         stripped = line.strip()
+        if stripped == "---":
+            in_frontmatter = not in_frontmatter
+            continue
+        if in_frontmatter:
+            continue
         if not stripped:
             continue
         if stripped.startswith("#"):
