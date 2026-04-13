@@ -48,7 +48,7 @@ def _load_skills_content() -> str:
     if not SKILLS_DIR.is_dir():
         return ""
     parts = []
-    for path in sorted(SKILLS_DIR.glob("*.md")):
+    for path in sorted(SKILLS_DIR.glob("*/SKILL.md")):
         content = path.read_text().strip()
         if content:
             parts.append(content)

@@ -45,10 +45,11 @@ def list_skills() -> list[dict]:
         return []
 
     skills = []
-    for path in sorted(SKILLS_DIR.glob("*.md")):
+    for path in sorted(SKILLS_DIR.glob("*/SKILL.md")):
         content = path.read_text()
+        name = path.parent.name
         skills.append({
-            "name": path.stem,
+            "name": name,
             "path": str(path),
             "description": _extract_description(content),
         })
@@ -61,7 +62,7 @@ def load_skills_content() -> str:
         return ""
 
     parts = []
-    for path in sorted(SKILLS_DIR.glob("*.md")):
+    for path in sorted(SKILLS_DIR.glob("*/SKILL.md")):
         content = path.read_text().strip()
         if content:
             parts.append(content)
