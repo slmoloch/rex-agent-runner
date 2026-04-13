@@ -39,6 +39,8 @@ Skills:
 
 Sessions:
   session reset                          Reset the main session
+  session list                           List all tracked sessions
+  session gc                             Run session garbage collection
   dispatch <session> <message>            Dispatch a prompt to a session (main|new)
 
 Callbacks:

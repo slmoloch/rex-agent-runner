@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 INSTALL_DIR = Path(__file__).parent
@@ -66,16 +67,74 @@ def resolve_session_id(target: str) -> str | None:
     return target
 
 
+# --- Session registry ---
+
+def register_session(session_id: str, name: str | None = None) -> None:
+    """Register a session in the tracker and update its last activity."""
+    if not session_id:
+        return
+    data = _load()
+    tracked = data.setdefault("tracked", {})
+    now = datetime.now().isoformat()
+    if session_id not in tracked:
+        tracked[session_id] = {"name": name, "last_activity": now}
+    else:
+        tracked[session_id]["last_activity"] = now
+        if name and not tracked[session_id].get("name"):
+            tracked[session_id]["name"] = name
+    _save(data)
+
+
+def unregister_session(session_id: str) -> None:
+    """Remove a session from the tracker."""
+    data = _load()
+    tracked = data.get("tracked", {})
+    if session_id in tracked:
+        del tracked[session_id]
+        _save(data)
+
+
+def get_tracked_sessions() -> dict:
+    """Return all tracked sessions: {session_id: {name, last_activity}}."""
+    return _load().get("tracked", {})
+
+
 def cmd_reset() -> None:
     reset_main_session()
     print("Main session reset. Will start fresh on next message.")
+
+
+def cmd_gc() -> None:
+    from rex_gc import collect
+    cleaned = collect()
+    if cleaned:
+        print("Cleaned %d session(s): %s" % (len(cleaned), ", ".join(cleaned)))
+    else:
+        print("No sessions to clean.")
+
+
+def cmd_list_tracked() -> None:
+    tracked = get_tracked_sessions()
+    main_id = get_main_session_id()
+    if not tracked:
+        print("No tracked sessions.")
+        return
+    print("Tracked sessions:")
+    for sid, info in tracked.items():
+        name = info.get("name") or ""
+        last = info.get("last_activity", "?")
+        is_main = " (main)" if sid == main_id else ""
+        label = " [%s]" % name if name else ""
+        print("  %s%s%s  last_activity=%s" % (sid, label, is_main, last))
 
 
 def usage() -> None:
     print("""Usage: rex session <command>
 
 Commands:
-  reset          Reset the main session (starts fresh on next use)""")
+  reset          Reset the main session (starts fresh on next use)
+  list           List all tracked sessions
+  gc             Run session garbage collection""")
 
 
 def main() -> None:
@@ -89,6 +148,10 @@ def main() -> None:
 
     if cmd == "reset":
         cmd_reset()
+    elif cmd == "list":
+        cmd_list_tracked()
+    elif cmd == "gc":
+        cmd_gc()
     else:
         print("Unknown session command: %s" % cmd)
         usage()
