@@ -23,8 +23,11 @@ from rex_session import (
     set_main_session_id,
     reset_main_session,
     resolve_session_id,
+    register_session,
+    get_tracked_sessions,
 )
 from rex_events import append_event, load_events
+from rex_gc import mark_running, mark_stopped, run_gc_loop, is_running
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -49,28 +52,46 @@ def is_authorized(update):
     return True
 
 
-def _run_in_session(prompt, session_target, trigger, timeout=600):
+def _run_in_session(prompt, session_target, trigger, timeout=600, caller_session=None):
     """Run a Claude prompt in the given session target and log the event.
 
     session_target: "main" (persistent), "new" (ephemeral), or a raw session ID.
     trigger: source of the prompt (e.g. "telegram", "callback:name", "dispatch").
+    caller_session: session ID of the caller (for dispatch tracking).
     """
     session_id = resolve_session_id(session_target)
-    result = run_claude(prompt, session_id=session_id, timeout=timeout)
 
-    if session_target == MAIN_SESSION and result["session_id"]:
-        set_main_session_id(result["session_id"])
+    if session_id:
+        mark_running(session_id)
+    try:
+        result = run_claude(prompt, session_id=session_id, timeout=timeout)
+    finally:
+        if session_id:
+            mark_stopped(session_id)
 
-    append_event({
+    new_session_id = result["session_id"]
+
+    if session_target == MAIN_SESSION and new_session_id:
+        set_main_session_id(new_session_id)
+
+    # Register the session so the GC can track it.
+    if new_session_id:
+        name = session_target if session_target == MAIN_SESSION else None
+        register_session(new_session_id, name=name)
+
+    event = {
         "session": session_target,
-        "session_id": result["session_id"],
+        "session_id": new_session_id,
         "trigger": trigger,
         "prompt_preview": prompt[:200],
         "response_preview": result["response"][:500],
         "cost_usd": result["cost_usd"],
         "duration_ms": result["duration_ms"],
         "num_turns": result["num_turns"],
-    })
+    }
+    if caller_session:
+        event["caller_session"] = caller_session
+    append_event(event)
 
     return result["response"]
 
@@ -96,20 +117,36 @@ async def handle_message(update, context):
     if not is_authorized(update):
         return
 
-    await update.effective_chat.send_action("typing")
+    chat = update.effective_chat
 
-    loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(
-        None, lambda: _run_in_session(
-            update.message.text, MAIN_SESSION, trigger="telegram", timeout=300
+    # Telegram's typing indicator expires after ~5s; re-send it every 4s
+    # until the Claude run finishes.
+    typing_task = asyncio.create_task(_keep_typing(chat))
+    try:
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None, lambda: _run_in_session(
+                update.message.text, MAIN_SESSION, trigger="telegram", timeout=300
+            )
         )
-    )
+    finally:
+        typing_task.cancel()
 
     if len(response) <= 4096:
         await update.message.reply_text(response)
     else:
         for i in range(0, len(response), 4096):
             await update.message.reply_text(response[i : i + 4096])
+
+
+async def _keep_typing(chat):
+    """Send 'typing' action every 4 seconds until cancelled."""
+    try:
+        while True:
+            await chat.send_action("typing")
+            await asyncio.sleep(4)
+    except asyncio.CancelledError:
+        pass
 
 
 # --- HTTP endpoints ---
@@ -137,7 +174,10 @@ async def handle_job_request(request):
 
     loop = asyncio.get_event_loop()
     response = await loop.run_in_executor(
-        None, lambda: _run_in_session(prompt, session_target, trigger=job_name)
+        None, lambda: _run_in_session(
+            prompt, session_target, trigger=job_name,
+            caller_session=caller_session,
+        )
     )
 
     logger.info("Job %s finished. Response: %s", job_name, response[:500])
@@ -147,6 +187,22 @@ async def handle_job_request(request):
 async def handle_events_api(request):
     events = load_events(days=7)
     return web.json_response(events)
+
+
+async def handle_sessions_api(request):
+    tracked = get_tracked_sessions()
+    main_id = get_main_session_id()
+    sessions = []
+    for sid, info in tracked.items():
+        sessions.append({
+            "session_id": sid,
+            "name": info.get("name"),
+            "last_activity": info.get("last_activity"),
+            "is_main": sid == main_id,
+            "is_running": is_running(sid),
+        })
+    sessions.sort(key=lambda s: s.get("last_activity", ""), reverse=True)
+    return web.json_response(sessions)
 
 
 async def handle_dashboard(request):
@@ -160,6 +216,7 @@ async def run_http_server():
     app = web.Application()
     app.router.add_get("/", handle_dashboard)
     app.router.add_get("/api/events", handle_events_api)
+    app.router.add_get("/api/sessions", handle_sessions_api)
     app.router.add_post("/job", handle_job_request)
     runner = web.AppRunner(app)
     await runner.setup()
@@ -170,6 +227,7 @@ async def run_http_server():
 
 async def post_init(application):
     await run_http_server()
+    asyncio.create_task(run_gc_loop())
 
 
 def main():
