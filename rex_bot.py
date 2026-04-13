@@ -24,9 +24,10 @@ from rex_session import (
     reset_main_session,
     resolve_session_id,
     register_session,
+    get_tracked_sessions,
 )
 from rex_events import append_event, load_events
-from rex_gc import mark_running, mark_stopped, run_gc_loop
+from rex_gc import mark_running, mark_stopped, run_gc_loop, is_running
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -172,6 +173,22 @@ async def handle_events_api(request):
     return web.json_response(events)
 
 
+async def handle_sessions_api(request):
+    tracked = get_tracked_sessions()
+    main_id = get_main_session_id()
+    sessions = []
+    for sid, info in tracked.items():
+        sessions.append({
+            "session_id": sid,
+            "name": info.get("name"),
+            "last_activity": info.get("last_activity"),
+            "is_main": sid == main_id,
+            "is_running": is_running(sid),
+        })
+    sessions.sort(key=lambda s: s.get("last_activity", ""), reverse=True)
+    return web.json_response(sessions)
+
+
 async def handle_dashboard(request):
     index_path = WEB_DIR / "index.html"
     if not index_path.exists():
@@ -183,6 +200,7 @@ async def run_http_server():
     app = web.Application()
     app.router.add_get("/", handle_dashboard)
     app.router.add_get("/api/events", handle_events_api)
+    app.router.add_get("/api/sessions", handle_sessions_api)
     app.router.add_post("/job", handle_job_request)
     runner = web.AppRunner(app)
     await runner.setup()

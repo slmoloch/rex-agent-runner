@@ -12,7 +12,7 @@ import asyncio
 import logging
 
 from rex_callback import _load_callbacks
-from rex_events import load_events
+from rex_events import append_event, load_events
 from rex_session import (
     MAIN_SESSION,
     get_main_session_id,
@@ -112,6 +112,17 @@ def collect() -> list[str]:
         )
         unregister_session(session_id)
         cleaned.append(session_id)
+
+        append_event({
+            "session": info.get("name") or session_id,
+            "session_id": session_id,
+            "trigger": "gc",
+            "prompt_preview": "Session garbage collected",
+            "response_preview": "last_activity=%s" % info.get("last_activity", "?"),
+            "cost_usd": 0,
+            "duration_ms": 0,
+            "num_turns": 0,
+        })
 
     return cleaned
 
