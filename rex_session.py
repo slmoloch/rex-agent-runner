@@ -14,7 +14,7 @@ BASE_DIR = Path(os.environ["REX_PROJECT_DIR"]) if "REX_PROJECT_DIR" in os.enviro
 with open(BASE_DIR / "config.json") as f:
     CONFIG = json.load(f)
 
-WORKDIR = Path(CONFIG.get("workspace", "./workspace")).resolve()
+WORKDIR = (BASE_DIR / CONFIG.get("workspace", "./workspace")).resolve()
 SESSIONS_FILE = WORKDIR / "sessions.json"
 
 MAIN_SESSION = "main"

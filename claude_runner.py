@@ -18,7 +18,7 @@ CONFIG_PATH = BASE_DIR / "config.json"
 with open(CONFIG_PATH) as f:
     CONFIG = json.load(f)
 
-WORKDIR = str(Path(CONFIG.get("workspace", "./workspace")).resolve())
+WORKDIR = str((BASE_DIR / CONFIG.get("workspace", "./workspace")).resolve())
 
 def _find_claude() -> str:
     if CONFIG.get("claude_bin"):
