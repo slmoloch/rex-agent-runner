@@ -15,7 +15,7 @@ CONFIG_PATH = BASE_DIR / "config.json"
 with open(CONFIG_PATH) as f:
     CONFIG = json.load(f)
 
-WORKDIR = Path(CONFIG.get("workspace", "./workspace")).resolve()
+WORKDIR = (BASE_DIR / CONFIG.get("workspace", "./workspace")).resolve()
 SKILLS_DIR = WORKDIR / "skills"
 
 
