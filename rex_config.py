@@ -179,14 +179,20 @@ def cmd_status() -> None:
         print("Rex daemon: not running")
         return
 
+    cfg = load_config()
+    port = cfg.get("job_port", 9821)
+    dashboard_url = f"http://127.0.0.1:{port}/"
+
     # Parse PID from launchctl output
     for line in result.stdout.splitlines():
         if '"PID"' in line:
             pid = line.split("=")[-1].strip().rstrip(";")
             print(f"Rex daemon: running (PID {pid})")
+            print(f"Dashboard:  {dashboard_url}")
             return
 
     print("Rex daemon: loaded (not currently running)")
+    print(f"Dashboard:  {dashboard_url}")
 
 
 def cmd_logs(follow: bool = False) -> None:
