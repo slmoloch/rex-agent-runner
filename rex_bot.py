@@ -117,20 +117,36 @@ async def handle_message(update, context):
     if not is_authorized(update):
         return
 
-    await update.effective_chat.send_action("typing")
+    chat = update.effective_chat
 
-    loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(
-        None, lambda: _run_in_session(
-            update.message.text, MAIN_SESSION, trigger="telegram", timeout=300
+    # Telegram's typing indicator expires after ~5s; re-send it every 4s
+    # until the Claude run finishes.
+    typing_task = asyncio.create_task(_keep_typing(chat))
+    try:
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None, lambda: _run_in_session(
+                update.message.text, MAIN_SESSION, trigger="telegram", timeout=300
+            )
         )
-    )
+    finally:
+        typing_task.cancel()
 
     if len(response) <= 4096:
         await update.message.reply_text(response)
     else:
         for i in range(0, len(response), 4096):
             await update.message.reply_text(response[i : i + 4096])
+
+
+async def _keep_typing(chat):
+    """Send 'typing' action every 4 seconds until cancelled."""
+    try:
+        while True:
+            await chat.send_action("typing")
+            await asyncio.sleep(4)
+    except asyncio.CancelledError:
+        pass
 
 
 # --- HTTP endpoints ---
