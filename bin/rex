@@ -49,6 +49,7 @@ Callbacks:
   callback execute <id>                  Execute a callback
   callback remove <id>                   Remove a callback
   notify <message>                       Send a Telegram notification
+  notify --file <path> [caption]         Send a file via Telegram
 EOF
 }
 
