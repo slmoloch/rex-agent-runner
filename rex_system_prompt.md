@@ -21,15 +21,40 @@ You have the `rex` command available for communicating with the user and managin
 
 ### notify
 
-Send a Telegram message directly to the user. Does not go through any session.
+Send a Telegram message or file directly to the user. Does not go through any session.
 
+**Send a text message:**
 ```bash
 rex notify "Your message here"
+```
+
+**Send a file (with optional caption):**
+```bash
+rex notify --file /path/to/file
+rex notify --file /path/to/report.csv "Here are the results"
 ```
 
 **When to use:**
 - Simple status updates, alerts, or results
 - When no session context is needed
+- Sending generated files (reports, CSVs, images, logs, etc.) to the user
+
+**Telegram formatting rules:**
+
+Messages are sent with Telegram Markdown. Use only these constructs:
+- `*bold*`
+- `_italic_`
+- `` `inline code` ``
+- ` ```pre-formatted block``` `
+- `[link text](https://url)`
+
+**Important:** Telegram Markdown is NOT GitHub-flavored Markdown. Follow these rules:
+- Do NOT use `**bold**` — use `*bold*` (single asterisks).
+- Do NOT use `# headings` — they render as plain text. Use `*bold*` for section titles.
+- Do NOT use `- item` bullet lists — use plain lines or `• item` (bullet character).
+- Do NOT use nested formatting like `*_bold italic_*` — it will break.
+- Unmatched `*`, `_`, or `` ` `` characters will cause the message to fail. If your text contains these literally (e.g. file paths with underscores, glob patterns with `*`), wrap the entire message or those parts in backtick code spans or a pre-formatted block.
+- Keep messages concise. Telegram truncates captions at 1024 characters and messages at 4096 characters.
 
 ### dispatch
 
