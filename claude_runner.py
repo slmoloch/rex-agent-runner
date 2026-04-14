@@ -90,13 +90,29 @@ class ProcessDiedError(RuntimeError):
 
 
 class ProcessBusyError(RuntimeError):
-    """Raised when the persistent process is already handling another prompt.
+    """Raised when the session's worker is busy and cannot pick up a new prompt.
 
     This happens during dispatch-back: Session A dispatches to B, and B
-    dispatches back to A while A's process is still locked.  The caller
+    dispatches back to A while A's worker is still processing.  The caller
     should fall back to a one-shot subprocess without removing the busy
     process from the pool.
     """
+
+
+class _PromptRequest:
+    """An item in a ClaudeProcess message queue."""
+
+    __slots__ = ("prompt", "timeout", "started", "done",
+                 "result", "error", "cancelled")
+
+    def __init__(self, prompt: str, timeout: int):
+        self.prompt = prompt
+        self.timeout = timeout
+        self.started = threading.Event()
+        self.done = threading.Event()
+        self.result: dict | None = None
+        self.error: BaseException | None = None
+        self.cancelled = False
 
 
 class ClaudeProcess:
@@ -105,6 +121,10 @@ class ClaudeProcess:
     Uses ``--input-format stream-json`` / ``--output-format stream-json`` to
     keep the process alive across multiple prompts, avoiding the startup
     overhead of spawning a new ``claude -p`` for every message.
+
+    Each instance owns a *message queue* and a dedicated *worker thread*.
+    Callers submit prompts via :meth:`send_message`; the worker drains the
+    queue and forwards them to the subprocess one at a time.
     """
 
     def __init__(self, session_id: str, system_prompt: str | None = None,
@@ -112,10 +132,11 @@ class ClaudeProcess:
         self.session_id = session_id
         self.is_new = is_new
         self.process: subprocess.Popen | None = None
-        self.lock = threading.Lock()
         self.last_used = time.time()
         self._stdout_queue: queue.Queue[str | None] = queue.Queue()
+        self._msg_queue: queue.Queue[_PromptRequest | None] = queue.Queue()
         self._reader_thread: threading.Thread | None = None
+        self._worker_thread: threading.Thread | None = None
         self._start(system_prompt)
 
     def _start(self, system_prompt: str | None = None) -> None:
@@ -152,11 +173,15 @@ class ClaudeProcess:
                                                daemon=True)
         self._reader_thread.start()
 
+        self._worker_thread = threading.Thread(target=self._worker_loop,
+                                               daemon=True)
+        self._worker_thread.start()
+
         logger.info("Started persistent Claude process for session %s "
                      "(pid=%d, new=%s)",
                      self.session_id, self.process.pid, self.is_new)
 
-    # -- background reader ---------------------------------------------------
+    # -- background threads ---------------------------------------------------
 
     def _read_stdout(self) -> None:
         """Background thread: read lines from stdout into a queue."""
@@ -168,36 +193,47 @@ class ClaudeProcess:
             pass
         self._stdout_queue.put(None)  # EOF sentinel
 
-    # -- public API -----------------------------------------------------------
-
-    def send_message(self, prompt: str, timeout: int = 300) -> dict:
-        """Send a user message and block until the full response arrives."""
-        if not self.lock.acquire(timeout=5):
-            raise ProcessBusyError(
-                "Process for session %s is busy with another prompt"
-                % self.session_id)
-        try:
-            if not self.is_alive():
-                raise ProcessDiedError(
-                    "Claude process exited (pid was %s)"
-                    % (self.process.pid if self.process else "?"))
-
-            # Update timestamp before sending so the cleanup loop won't kill
-            # a process that's in the middle of a long-running prompt.
-            self.last_used = time.time()
-
-            msg = json.dumps({"type": "user_input", "content": prompt})
+    def _worker_loop(self) -> None:
+        """Background thread: drain the message queue and forward prompts
+        to the subprocess one at a time."""
+        while True:
             try:
-                self.process.stdin.write(msg + "\n")
-                self.process.stdin.flush()
-            except (BrokenPipeError, OSError) as exc:
-                raise ProcessDiedError(
-                    "Failed to write to Claude stdin: %s" % exc)
+                req = self._msg_queue.get()
+            except Exception:
+                break
+            if req is None:  # shutdown sentinel
+                break
+            if req.cancelled:
+                continue
+            req.started.set()
+            try:
+                req.result = self._do_send(req.prompt, req.timeout)
+            except Exception as exc:
+                req.error = exc
+            finally:
+                req.done.set()
 
-            logger.info("Prompt (persistent): %s", prompt[:200])
-            return self._read_response(timeout)
-        finally:
-            self.lock.release()
+    # -- internal send --------------------------------------------------------
+
+    def _do_send(self, prompt: str, timeout: int) -> dict:
+        """Write one prompt to stdin and collect the response."""
+        if not self.is_alive():
+            raise ProcessDiedError(
+                "Claude process exited (pid was %s)"
+                % (self.process.pid if self.process else "?"))
+
+        self.last_used = time.time()
+
+        msg = json.dumps({"type": "user_input", "content": prompt})
+        try:
+            self.process.stdin.write(msg + "\n")
+            self.process.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            raise ProcessDiedError(
+                "Failed to write to Claude stdin: %s" % exc)
+
+        logger.info("Prompt (persistent): %s", prompt[:200])
+        return self._read_response(timeout)
 
     def _read_response(self, timeout: int) -> dict:
         response_text = ""
@@ -265,10 +301,47 @@ class ClaudeProcess:
             "num_turns": turns,
         }
 
+    # -- public API -----------------------------------------------------------
+
+    def send_message(self, prompt: str, timeout: int = 300) -> dict:
+        """Queue a prompt and block until the response is ready.
+
+        The prompt is placed on this session's message queue.  A dedicated
+        worker thread picks it up, writes it to the subprocess stdin, and
+        collects the streaming response.
+
+        If the worker does not *start* processing within 10 s (e.g. it is
+        blocked on a previous prompt in a dispatch-back deadlock), a
+        ``ProcessBusyError`` is raised so the caller can fall back to a
+        one-shot subprocess.
+        """
+        req = _PromptRequest(prompt, timeout)
+        self._msg_queue.put(req)
+
+        # Phase 1 — wait for the worker to pick up our request.
+        if not req.started.wait(timeout=10):
+            req.cancelled = True
+            raise ProcessBusyError(
+                "Worker for session %s did not pick up the prompt in 10 s"
+                % self.session_id)
+
+        # Phase 2 — wait for the actual response.
+        if not req.done.wait(timeout=timeout):
+            raise TimeoutError(
+                "Prompt timed out after %ds (session %s)"
+                % (timeout, self.session_id))
+
+        if req.error is not None:
+            raise req.error
+        return req.result
+
     def is_alive(self) -> bool:
         return self.process is not None and self.process.poll() is None
 
     def close(self) -> None:
+        # Tell the worker to stop.
+        self._msg_queue.put(None)
+
         if self.process is None:
             return
         pid = self.process.pid
