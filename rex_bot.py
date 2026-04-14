@@ -3,6 +3,7 @@
 Also listens on a local HTTP port for job submissions and a web dashboard."""
 from __future__ import annotations
 
+import atexit
 import asyncio
 import json
 import logging
@@ -16,7 +17,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from claude_runner import CONFIG, WORKDIR, INSTALL_DIR, run_claude
+from claude_runner import CONFIG, WORKDIR, INSTALL_DIR, run_claude, close_session, shutdown_pool
 from rex_session import (
     MAIN_SESSION,
     get_main_session_id,
@@ -109,7 +110,10 @@ async def start(update, context):
 async def new_conversation(update, context):
     if not is_authorized(update):
         return
+    old_session_id = get_main_session_id()
     reset_main_session()
+    if old_session_id:
+        close_session(old_session_id)
     await update.message.reply_text("Session reset. Send a message to start fresh.")
 
 
@@ -231,6 +235,8 @@ async def post_init(application):
 
 
 def main():
+    atexit.register(shutdown_pool)
+
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start))

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from claude_runner import close_session
 from rex_callback import _load_callbacks
 from rex_events import append_event, load_events
 from rex_session import (
@@ -111,6 +112,7 @@ def collect() -> list[str]:
             session_id, info.get("name"), info.get("last_activity"),
         )
         unregister_session(session_id)
+        close_session(session_id)
         cleaned.append(session_id)
 
         append_event({
