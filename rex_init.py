@@ -140,6 +140,7 @@ def main() -> None:
         workspace,
         workspace / "jobs",
         workspace / "skills",
+        workspace / "events",
         project_dir / "logs",
     ]
     for d in dirs:
