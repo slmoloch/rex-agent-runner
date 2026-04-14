@@ -6,6 +6,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import logging.handlers
+import os
 from pathlib import Path
 from aiohttp import web
 from telegram import Update
@@ -29,10 +31,27 @@ from rex_session import (
 from rex_events import append_event, load_events
 from rex_gc import mark_running, mark_stopped, run_gc_loop, is_running
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
+_BASE_DIR = Path(os.environ["REX_PROJECT_DIR"]) if "REX_PROJECT_DIR" in os.environ else INSTALL_DIR
+_LOG_DIR = _BASE_DIR / "logs"
+_LOG_DIR.mkdir(exist_ok=True)
+
+_fmt = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+# Hourly rotating file handler — keeps 168 files (7 days)
+_file_handler = logging.handlers.TimedRotatingFileHandler(
+    _LOG_DIR / "rex.log",
+    when="H",
+    interval=1,
+    backupCount=168,
+    utc=False,
 )
+_file_handler.setFormatter(_fmt)
+
+# Console handler for stdout (captured by launchd / systemd)
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_fmt)
+
+logging.basicConfig(level=logging.INFO, handlers=[_file_handler, _console_handler])
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)

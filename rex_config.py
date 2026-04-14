@@ -196,19 +196,29 @@ def cmd_status() -> None:
 
 
 def cmd_logs(follow: bool = False) -> None:
-    """Show all logs (daemon, errors, jobs)."""
+    """Show all logs (daemon, errors, jobs).
+
+    The main log is ``rex.log`` which rotates hourly.  When following we
+    only tail the current (active) log files so the output stays useful.
+    """
     if not LOG_DIR.exists():
         print("No logs yet.")
         return
 
-    log_files = sorted(LOG_DIR.glob("*.log")) + sorted(LOG_DIR.glob("*.err.log"))
-    if not log_files:
-        print("No logs yet.")
-        return
-
     if follow:
-        subprocess.run(["tail", "-f"] + [str(f) for f in log_files])
+        # Follow only the active (non-rotated) logs
+        active = sorted(LOG_DIR.glob("*.log")) + sorted(LOG_DIR.glob("*.err.log"))
+        active = [f for f in active if f.suffix == ".log" or f.name.endswith(".err.log")]
+        if not active:
+            print("No logs yet.")
+            return
+        subprocess.run(["tail", "-f"] + [str(f) for f in active])
     else:
+        # Show recent entries from all logs including rotated ones
+        log_files = sorted(LOG_DIR.glob("rex.log*")) + sorted(LOG_DIR.glob("daemon.*")) + sorted(LOG_DIR.glob("callback_*"))
+        if not log_files:
+            print("No logs yet.")
+            return
         subprocess.run(["tail", "-50"] + [str(f) for f in log_files])
 
 
