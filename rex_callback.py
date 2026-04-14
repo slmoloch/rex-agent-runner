@@ -204,7 +204,12 @@ def cmd_execute(callback_id):
         sys.exit(1)
 
     cb = callbacks[callback_id]
-    prompt = cb["prompt"]
+    prompt = (
+        "This is a scheduled message. Process the following message or request. "
+        "Use `rex notify` if the user needs to be notified. "
+        "Keep quiet otherwise.\n\n"
+        + cb["prompt"]
+    )
     command = cb.get("command")
 
     # Run pre-check command if defined
