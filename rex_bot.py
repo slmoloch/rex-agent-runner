@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timedelta
 import logging.handlers
 import os
 from pathlib import Path
@@ -128,6 +129,27 @@ async def start(update, context):
 async def new_conversation(update, context):
     if not is_authorized(update):
         return
+
+    chat = update.effective_chat
+    main_session_id = get_main_session_id()
+
+    # Let the current session save context before wiping it.
+    if main_session_id:
+        typing_task = asyncio.create_task(_keep_typing(chat))
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: _run_in_session(
+                    PREPARE_RESET_PROMPT, MAIN_SESSION,
+                    trigger="reset-prepare", timeout=300,
+                ),
+            )
+        except Exception:
+            logger.exception("/new: preparation prompt failed")
+        finally:
+            typing_task.cancel()
+
     reset_main_session()
     await update.message.reply_text("Session reset. Send a message to start fresh.")
 
@@ -244,9 +266,89 @@ async def run_http_server():
     logger.info("Dashboard: http://127.0.0.1:%d/", JOB_PORT)
 
 
+DAILY_RESET_POLL_SECONDS = 10  # how often to check if session is inactive
+
+PREPARE_RESET_PROMPT = (
+    "Heads up: your session is about to be reset."
+)
+
+
+async def run_daily_reset_loop():
+    """Background task that resets the main session at midnight each day.
+
+    If the main session is active at midnight, waits until it becomes
+    inactive before performing the reset.  After resetting, starts a new
+    session and informs the agent about the daily reset and current date.
+    """
+    logger.info("Daily session reset scheduler started.")
+    while True:
+        # Sleep until next midnight.
+        now = datetime.now()
+        tomorrow = (now + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        seconds_until_midnight = (tomorrow - now).total_seconds()
+        logger.info(
+            "Daily reset: next reset in %.0f seconds (at %s)",
+            seconds_until_midnight,
+            tomorrow.isoformat(),
+        )
+        await asyncio.sleep(seconds_until_midnight)
+
+        # Wait until the main session is no longer active.
+        main_session_id = get_main_session_id()
+        if main_session_id and is_running(main_session_id):
+            logger.info("Daily reset: main session is active, waiting…")
+            while main_session_id and is_running(main_session_id):
+                await asyncio.sleep(DAILY_RESET_POLL_SECONDS)
+                main_session_id = get_main_session_id()
+            logger.info("Daily reset: main session is now inactive.")
+
+        # Tell the current session to prepare for the reset.
+        main_session_id = get_main_session_id()
+        if main_session_id:
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    lambda: _run_in_session(
+                        PREPARE_RESET_PROMPT, MAIN_SESSION,
+                        trigger="daily-reset-prepare", timeout=300,
+                    ),
+                )
+                logger.info("Daily reset: preparation prompt completed.")
+            except Exception:
+                logger.exception("Daily reset: preparation prompt failed")
+
+        # Reset the main session.
+        reset_main_session()
+        logger.info("Daily reset: main session has been reset.")
+
+        # Start a new session and tell the agent about the reset.
+        today = datetime.now().strftime("%Y-%m-%d")
+        reset_prompt = (
+            "Your session has been reset (daily midnight reset). "
+            "Today's date is %s." % today
+        )
+
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: _run_in_session(
+                    reset_prompt, MAIN_SESSION,
+                    trigger="daily-reset", timeout=300,
+                ),
+            )
+            logger.info("Daily reset: new session initialized successfully.")
+        except Exception:
+            logger.exception("Daily reset: failed to initialize new session")
+
+
 async def post_init(application):
     await run_http_server()
     asyncio.create_task(run_gc_loop())
+    asyncio.create_task(run_daily_reset_loop())
 
 
 def main():
