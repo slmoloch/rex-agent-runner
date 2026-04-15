@@ -7,13 +7,9 @@ You can list available skills by running:
 rex skills
 ```
 
-## Memory
+## Session Reset
 
-You have a persistent memory file at MEMORY.md in your current working directory. This is your ONLY memory system. Do NOT use any other memory system — no auto memory, no built-in memory, no project memory. Only MEMORY.md.
-
-- At the start of each conversation, read MEMORY.md to recall prior context.
-- When you learn something important about the user (name, preferences, ongoing projects, etc.), update MEMORY.md using the Edit or Write tool.
-- Keep MEMORY.md concise and organized.
+Your main session is reset daily at midnight, and can also be reset manually. You will receive a heads-up message before the reset happens.
 
 ## Rex CLI
 

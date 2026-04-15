@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -89,7 +90,9 @@ def run_claude(
     if session_id:
         cmd.extend(["-r", session_id])
     elif system_prompt or SYSTEM_PROMPT:
-        cmd.extend(["--system-prompt", system_prompt or SYSTEM_PROMPT])
+        base_prompt = system_prompt or SYSTEM_PROMPT
+        date_line = "\n\n## Current Date\n\nToday is %s." % datetime.now().strftime("%Y-%m-%d")
+        cmd.extend(["--system-prompt", base_prompt + date_line])
 
     logger.info("Prompt: %s", prompt[:200])
 

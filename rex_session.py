@@ -100,6 +100,17 @@ def get_tracked_sessions() -> dict:
 
 
 def cmd_reset() -> None:
+    from claude_runner import run_claude
+
+    session_id = get_main_session_id()
+    if session_id:
+        print("Preparing session for reset…")
+        prepare_prompt = "Heads up: your session is about to be reset."
+        try:
+            run_claude(prepare_prompt, session_id=session_id, timeout=300)
+        except Exception as exc:
+            print("Warning: preparation prompt failed: %s" % exc)
+
     reset_main_session()
     print("Main session reset. Will start fresh on next message.")
 
