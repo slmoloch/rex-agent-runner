@@ -100,14 +100,22 @@ def run_claude(
     if session_id:
         env["REX_SESSION_ID"] = session_id
 
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        cwd=WORKDIR,
-        timeout=timeout,
-        env=env,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=WORKDIR,
+            timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        logger.error("claude timed out after %d seconds", timeout)
+        return {
+            "response": "Error: Claude timed out after %d seconds." % timeout,
+            "session_id": session_id,
+            "cost_usd": 0, "duration_ms": 0, "num_turns": 0,
+        }
 
     if result.returncode != 0:
         stderr = result.stderr.strip()

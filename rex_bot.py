@@ -170,6 +170,9 @@ async def handle_message(update, context):
                 update.message.text, MAIN_SESSION, trigger="telegram", timeout=300
             )
         )
+    except Exception:
+        logger.exception("handle_message failed")
+        response = "Sorry, something went wrong while processing your message."
     finally:
         typing_task.cancel()
 
@@ -345,6 +348,18 @@ async def run_daily_reset_loop():
             logger.exception("Daily reset: failed to initialize new session")
 
 
+async def error_handler(update, context):
+    """Global error handler for the Telegram application."""
+    logger.error("Unhandled exception: %s", context.error, exc_info=context.error)
+    if update and update.effective_chat:
+        try:
+            await update.effective_chat.send_message(
+                "Sorry, something went wrong. Please try again."
+            )
+        except Exception:
+            logger.exception("Failed to send error message to user")
+
+
 async def post_init(application):
     await run_http_server()
     asyncio.create_task(run_gc_loop())
@@ -357,6 +372,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("new", new_conversation))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_error_handler(error_handler)
 
     logger.info("Bot started.")
     app.run_polling(drop_pending_updates=True)
