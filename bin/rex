@@ -37,6 +37,11 @@ Config:
 Skills:
   skills [list]                          List workspace skills
 
+Database:
+  db rebuild                             Rebuild SQLite from JSONL event logs
+  db clear                               Clear all events from SQLite
+  db stats                               Show database statistics
+
 Sessions:
   session reset                          Reset the main session
   session list                           List all tracked sessions
@@ -91,6 +96,10 @@ case "$cmd" in
     skills)
         load_project_dir
         exec "$PYTHON" "$INSTALL_DIR/rex_skills.py" "$@"
+        ;;
+    db)
+        load_project_dir
+        exec "$PYTHON" "$INSTALL_DIR/rex_db.py" "$@"
         ;;
     session)
         load_project_dir

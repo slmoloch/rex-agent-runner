@@ -215,6 +215,7 @@
 
   // --- state ---
   var allEvents = [];
+  var sessionInfo = {};
   var lastTs = null;
   var rangeH = 24;
   var svg, xScale, xAxisG, zoomBehavior, curTransform = d3.zoomIdentity;
@@ -231,7 +232,8 @@
       var sid = ev.session_id;
       if (!sid) return;
       if (!sMap[sid]) {
-        sMap[sid] = { id: sid, name: null, events: [], t0: Infinity, t1: -Infinity };
+        var knownName = sessionInfo[sid] ? sessionInfo[sid].name : null;
+        sMap[sid] = { id: sid, name: knownName || null, isMain: !!(sessionInfo[sid] && sessionInfo[sid].is_main), events: [], t0: Infinity, t1: -Infinity };
         order.push(sid);
       }
       var s = sMap[sid];
@@ -239,12 +241,14 @@
       var te = t + (ev.duration_ms || 0);
       if (t < s.t0) s.t0 = t;
       if (te > s.t1) s.t1 = te;
-      if (ev.session === 'main') s.name = 'main';
+      if (ev.session === 'main' && !s.name) s.name = 'main';
       s.events.push({ ev: ev, t0: t, t1: te });
     });
 
     var sessions = order.map(function (id) { return sMap[id]; });
     sessions.sort(function (a, b) {
+      if (a.isMain && !b.isMain) return -1;
+      if (b.isMain && !a.isMain) return 1;
       if (a.name === 'main' && b.name !== 'main') return -1;
       if (b.name === 'main' && a.name !== 'main') return 1;
       return a.t0 - b.t0;
@@ -383,13 +387,16 @@
     var list = document.getElementById('labels-list');
     list.innerHTML = '';
     sessions.forEach(function (s) {
+      var isMain = s.isMain || s.name === 'main';
+      var label = s.name || s.id.substring(0, 12);
+      if (s.isMain && s.name !== 'main') label = 'main (' + (s.name || s.id.substring(0, 8)) + ')';
       var div = document.createElement('div');
-      div.className = 'lane-label' + (s.name === 'main' ? ' is-main' : '');
+      div.className = 'lane-label' + (isMain ? ' is-main' : '');
       var dot = document.createElement('span');
       dot.className = 'dot';
-      dot.style.background = s.name === 'main' ? '#58a6ff' : '#30363d';
+      dot.style.background = isMain ? '#58a6ff' : '#30363d';
       div.appendChild(dot);
-      var txt = document.createTextNode(s.name || s.id.substring(0, 12));
+      var txt = document.createTextNode(label);
       div.appendChild(txt);
       div.title = s.id;
       list.appendChild(div);
@@ -415,6 +422,7 @@
     var blocksG = svg.select('.g-blocks');
     blocksG.selectAll('*').remove();
     sessions.forEach(function (s, i) {
+      var isMain = s.isMain || s.name === 'main';
       var y = AXIS_H + i * LANE_H + (LANE_H - BLOCK_H) / 2;
       blocksG.append('rect')
         .datum(s)
@@ -422,9 +430,9 @@
         .attr('x', xScale(s.t0)).attr('y', y)
         .attr('width', Math.max(2, xScale(s.t1) - xScale(s.t0)))
         .attr('height', BLOCK_H).attr('rx', 4)
-        .attr('fill', s.name === 'main' ? '#1f3a5f' : '#1c2128')
+        .attr('fill', isMain ? '#1f3a5f' : '#1c2128')
         .attr('fill-opacity', 0.5)
-        .attr('stroke', s.name === 'main' ? '#58a6ff' : '#30363d')
+        .attr('stroke', isMain ? '#58a6ff' : '#30363d')
         .attr('stroke-opacity', 0.5);
     });
 
@@ -528,14 +536,28 @@
   function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
   // --- data loading (incremental) ---
+  function fetchSessions() {
+    return fetch('/api/sessions')
+      .then(function (r) { return r.json(); })
+      .then(function (sessions) {
+        sessionInfo = {};
+        sessions.forEach(function (s) { sessionInfo[s.session_id] = s; });
+      })
+      .catch(function () {});
+  }
+
   function fetchData() {
     var url = '/api/events';
     if (lastTs) url += '?since=' + encodeURIComponent(lastTs);
 
     document.getElementById('status').textContent = 'Loading...';
-    fetch(url)
-      .then(function (r) { return r.json(); })
-      .then(function (events) {
+
+    Promise.all([
+      fetch(url).then(function (r) { return r.json(); }),
+      fetchSessions()
+    ])
+      .then(function (results) {
+        var events = results[0];
         if (lastTs && events.length > 0) {
           var seen = {};
           allEvents.forEach(function (e) { seen[e.timestamp + '|' + e.session_id] = true; });
