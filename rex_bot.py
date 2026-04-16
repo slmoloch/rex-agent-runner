@@ -230,6 +230,9 @@ async def handle_job_request(request):
 
 async def handle_events_api(request):
     events = load_events(days=7)
+    since = request.query.get('since')
+    if since:
+        events = [e for e in events if e.get('timestamp', '') > since]
     return web.json_response(events)
 
 
@@ -256,9 +259,17 @@ async def handle_dashboard(request):
     return web.FileResponse(index_path)
 
 
+async def handle_timeline(request):
+    path = WEB_DIR / "timeline.html"
+    if not path.exists():
+        return web.Response(text="Timeline not found.", status=404)
+    return web.FileResponse(path)
+
+
 async def run_http_server():
     app = web.Application()
     app.router.add_get("/", handle_dashboard)
+    app.router.add_get("/timeline", handle_timeline)
     app.router.add_get("/api/events", handle_events_api)
     app.router.add_get("/api/sessions", handle_sessions_api)
     app.router.add_post("/job", handle_job_request)
