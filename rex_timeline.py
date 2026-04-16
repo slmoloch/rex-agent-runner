@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""rex db - SQLite event store, populated from the JSONL event stream."""
+"""rex timeline - SQLite event store for the timeline visualisation."""
 from __future__ import annotations
 
 import json
@@ -148,7 +148,7 @@ def rebuild_from_logs() -> int:
 # --- CLI ---
 
 def usage() -> None:
-    print("""Usage: rex db <command>
+    print("""Usage: rex timeline <command>
 
 Commands:
   rebuild    Clear SQLite and repopulate from JSONL event logs
@@ -188,7 +188,7 @@ def main() -> None:
         print("Range:    %s to %s" % (oldest or "-", newest or "-"))
         print("Cost:     $%.4f" % cost)
     else:
-        print("Unknown db command: %s" % cmd)
+        print("Unknown timeline command: %s" % cmd)
         usage()
         sys.exit(1)
 

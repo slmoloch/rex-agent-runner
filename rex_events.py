@@ -31,7 +31,7 @@ def append_event(event: dict) -> None:
     with open(_current_events_path(), "a") as f:
         f.write(json.dumps(event) + "\n")
     try:
-        from rex_db import insert_event as db_insert, init_db
+        from rex_timeline import insert_event as db_insert, init_db
         init_db()
         db_insert(event)
     except Exception:

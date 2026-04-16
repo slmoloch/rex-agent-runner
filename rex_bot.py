@@ -30,7 +30,7 @@ from rex_session import (
     get_tracked_sessions,
 )
 from rex_events import append_event
-from rex_db import init_db, query_events
+from rex_timeline import init_db, query_events
 from rex_gc import mark_running, mark_stopped, run_gc_loop, is_running
 
 _BASE_DIR = Path(os.environ["REX_PROJECT_DIR"]) if "REX_PROJECT_DIR" in os.environ else INSTALL_DIR
