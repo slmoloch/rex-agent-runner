@@ -270,6 +270,7 @@ async def run_http_server():
     app = web.Application()
     app.router.add_get("/", handle_dashboard)
     app.router.add_get("/timeline", handle_timeline)
+    app.router.add_static("/static", WEB_DIR, show_index=False)
     app.router.add_get("/api/events", handle_events_api)
     app.router.add_get("/api/sessions", handle_sessions_api)
     app.router.add_post("/job", handle_job_request)
