@@ -83,6 +83,18 @@
     cursor: default;
   }
   .lane-label.is-main { color: #58a6ff; }
+  .main-badge {
+    font-size: 9px;
+    font-weight: 700;
+    color: #58a6ff;
+    background: #1f3a5f;
+    padding: 1px 5px;
+    border-radius: 8px;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    flex-shrink: 0;
+  }
   .lane-label .dot {
     width: 8px; height: 8px;
     border-radius: 50%;
@@ -232,8 +244,7 @@
       var sid = ev.session_id;
       if (!sid) return;
       if (!sMap[sid]) {
-        var knownName = sessionInfo[sid] ? sessionInfo[sid].name : null;
-        sMap[sid] = { id: sid, name: knownName || null, isMain: !!(sessionInfo[sid] && sessionInfo[sid].is_main), events: [], t0: Infinity, t1: -Infinity };
+        sMap[sid] = { id: sid, isMain: !!(sessionInfo[sid] && sessionInfo[sid].is_main), events: [], t0: Infinity, t1: -Infinity, mainT0: null, mainT1: null };
         order.push(sid);
       }
       var s = sMap[sid];
@@ -241,7 +252,10 @@
       var te = t + (ev.duration_ms || 0);
       if (t < s.t0) s.t0 = t;
       if (te > s.t1) s.t1 = te;
-      if (ev.session === 'main' && !s.name) s.name = 'main';
+      if (ev.session === 'main') {
+        if (s.mainT0 === null || t < s.mainT0) s.mainT0 = t;
+        if (s.mainT1 === null || te > s.mainT1) s.mainT1 = te;
+      }
       s.events.push({ ev: ev, t0: t, t1: te });
     });
 
@@ -249,8 +263,8 @@
     sessions.sort(function (a, b) {
       if (a.isMain && !b.isMain) return -1;
       if (b.isMain && !a.isMain) return 1;
-      if (a.name === 'main' && b.name !== 'main') return -1;
-      if (b.name === 'main' && a.name !== 'main') return 1;
+      if (a.mainT0 !== null && b.mainT0 === null) return -1;
+      if (b.mainT0 !== null && a.mainT0 === null) return 1;
       return a.t0 - b.t0;
     });
 
@@ -387,17 +401,20 @@
     var list = document.getElementById('labels-list');
     list.innerHTML = '';
     sessions.forEach(function (s) {
-      var isMain = s.isMain || s.name === 'main';
-      var label = s.name || s.id.substring(0, 12);
-      if (s.isMain && s.name !== 'main') label = 'main (' + (s.name || s.id.substring(0, 8)) + ')';
       var div = document.createElement('div');
-      div.className = 'lane-label' + (isMain ? ' is-main' : '');
+      div.className = 'lane-label' + (s.isMain ? ' is-main' : '');
       var dot = document.createElement('span');
       dot.className = 'dot';
-      dot.style.background = isMain ? '#58a6ff' : '#30363d';
+      dot.style.background = s.isMain ? '#58a6ff' : (s.mainT0 !== null ? '#1f3a5f' : '#30363d');
       div.appendChild(dot);
-      var txt = document.createTextNode(label);
-      div.appendChild(txt);
+      var label = s.id.substring(0, 14);
+      div.appendChild(document.createTextNode(label));
+      if (s.isMain) {
+        var badge = document.createElement('span');
+        badge.className = 'main-badge';
+        badge.textContent = 'main';
+        div.appendChild(badge);
+      }
       div.title = s.id;
       list.appendChild(div);
     });
@@ -422,7 +439,6 @@
     var blocksG = svg.select('.g-blocks');
     blocksG.selectAll('*').remove();
     sessions.forEach(function (s, i) {
-      var isMain = s.isMain || s.name === 'main';
       var y = AXIS_H + i * LANE_H + (LANE_H - BLOCK_H) / 2;
       blocksG.append('rect')
         .datum(s)
@@ -430,10 +446,22 @@
         .attr('x', xScale(s.t0)).attr('y', y)
         .attr('width', Math.max(2, xScale(s.t1) - xScale(s.t0)))
         .attr('height', BLOCK_H).attr('rx', 4)
-        .attr('fill', isMain ? '#1f3a5f' : '#1c2128')
+        .attr('fill', '#1c2128')
         .attr('fill-opacity', 0.5)
-        .attr('stroke', isMain ? '#58a6ff' : '#30363d')
+        .attr('stroke', '#30363d')
         .attr('stroke-opacity', 0.5);
+      if (s.mainT0 !== null) {
+        blocksG.append('rect')
+          .datum({ t0: s.mainT0, t1: s.mainT1 })
+          .attr('class', 'sess-block main-overlay')
+          .attr('x', xScale(s.mainT0)).attr('y', y)
+          .attr('width', Math.max(2, xScale(s.mainT1) - xScale(s.mainT0)))
+          .attr('height', BLOCK_H).attr('rx', 4)
+          .attr('fill', '#1f3a5f')
+          .attr('fill-opacity', 0.5)
+          .attr('stroke', '#58a6ff')
+          .attr('stroke-opacity', 0.6);
+      }
     });
 
     // events
