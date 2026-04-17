@@ -25,11 +25,17 @@ def _current_events_path() -> Path:
 
 
 def append_event(event: dict) -> None:
-    """Append an event to the current hour's log file. Adds timestamp if not present."""
+    """Append an event to the current hour's log file and to SQLite."""
     if "timestamp" not in event:
         event["timestamp"] = datetime.now().isoformat()
     with open(_current_events_path(), "a") as f:
         f.write(json.dumps(event) + "\n")
+    try:
+        from rex_timeline import insert_event as db_insert, init_db
+        init_db()
+        db_insert(event)
+    except Exception:
+        pass
 
 
 def _read_events_from(path: Path, cutoff: datetime) -> list[dict]:

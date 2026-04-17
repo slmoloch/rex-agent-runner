@@ -29,7 +29,8 @@ from rex_session import (
     register_session,
     get_tracked_sessions,
 )
-from rex_events import append_event, load_events
+from rex_events import append_event
+from rex_timeline import init_db, query_events
 from rex_gc import mark_running, mark_stopped, run_gc_loop, is_running
 
 _BASE_DIR = Path(os.environ["REX_PROJECT_DIR"]) if "REX_PROJECT_DIR" in os.environ else INSTALL_DIR
@@ -229,7 +230,8 @@ async def handle_job_request(request):
 
 
 async def handle_events_api(request):
-    events = load_events(days=7)
+    since = request.query.get('since')
+    events = query_events(days=7, since=since)
     return web.json_response(events)
 
 
@@ -256,9 +258,18 @@ async def handle_dashboard(request):
     return web.FileResponse(index_path)
 
 
+async def handle_timeline(request):
+    path = WEB_DIR / "timeline.html"
+    if not path.exists():
+        return web.Response(text="Timeline not found.", status=404)
+    return web.FileResponse(path)
+
+
 async def run_http_server():
     app = web.Application()
     app.router.add_get("/", handle_dashboard)
+    app.router.add_get("/timeline", handle_timeline)
+    app.router.add_static("/static", WEB_DIR, show_index=False)
     app.router.add_get("/api/events", handle_events_api)
     app.router.add_get("/api/sessions", handle_sessions_api)
     app.router.add_post("/job", handle_job_request)
@@ -361,6 +372,7 @@ async def error_handler(update, context):
 
 
 async def post_init(application):
+    init_db()
     await run_http_server()
     asyncio.create_task(run_gc_loop())
     asyncio.create_task(run_daily_reset_loop())
