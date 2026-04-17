@@ -48,8 +48,21 @@ def set_main_session_id(session_id: str) -> None:
 def reset_main_session() -> None:
     """Reset the main session so it starts fresh on next use."""
     data = _load()
+    old_session_id = data.get(MAIN_SESSION)
     data[MAIN_SESSION] = None
     _save(data)
+    if old_session_id:
+        from rex_events import append_event
+        append_event({
+            "session": MAIN_SESSION,
+            "session_id": old_session_id,
+            "trigger": "reset",
+            "prompt_preview": "Main session reset",
+            "response_preview": "",
+            "cost_usd": 0,
+            "duration_ms": 0,
+            "num_turns": 0,
+        })
 
 
 def resolve_session_id(target: str) -> str | None:
