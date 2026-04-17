@@ -93,7 +93,12 @@ def _run_in_session(prompt, session_target, trigger, timeout=600, caller_session
     new_session_id = result["session_id"]
 
     if session_target == MAIN_SESSION and new_session_id:
-        set_main_session_id(new_session_id)
+        # Only update main if it hasn't been replaced underneath us
+        # (e.g. a concurrent /new or daily-reset that wiped it). Without
+        # this guard, a long-running turn can resurrect the old session
+        # id after the reset has already installed a fresh one.
+        if get_main_session_id() == session_id:
+            set_main_session_id(new_session_id)
 
     # Register the session so the GC can track it.
     if new_session_id:
