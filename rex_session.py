@@ -120,7 +120,7 @@ def cmd_reset() -> None:
         print("Preparing session for reset…")
         prepare_prompt = "Heads up: your session is about to be reset."
         try:
-            run_claude(prepare_prompt, session_id=session_id, timeout=300)
+            run_claude(prepare_prompt, session_id=session_id)
         except Exception as exc:
             print("Warning: preparation prompt failed: %s" % exc)
 

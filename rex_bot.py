@@ -75,7 +75,7 @@ def is_authorized(update):
     return True
 
 
-def _run_in_session(prompt, session_target, trigger, timeout=600, caller_session=None):
+def _run_in_session(prompt, session_target, trigger, timeout=None, caller_session=None):
     """Run a Claude prompt in the given session target and log the event.
 
     session_target: "main" (persistent), "new" (ephemeral), or a raw session ID.
@@ -161,7 +161,7 @@ async def new_conversation(update, context):
                 None,
                 lambda: _run_in_session(
                     PREPARE_RESET_PROMPT, MAIN_SESSION,
-                    trigger="reset-prepare", timeout=300,
+                    trigger="reset-prepare",
                 ),
             )
         except Exception:
@@ -186,7 +186,7 @@ async def handle_message(update, context):
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None, lambda: _run_in_session(
-                update.message.text, MAIN_SESSION, trigger="telegram", timeout=300
+                update.message.text, MAIN_SESSION, trigger="telegram"
             )
         )
     except Exception:
@@ -359,7 +359,7 @@ async def handle_file(update, context):
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None, lambda: _run_in_session(
-                prompt, MAIN_SESSION, trigger="telegram-file", timeout=300
+                prompt, MAIN_SESSION, trigger="telegram-file"
             )
         )
     except Exception:
@@ -514,7 +514,7 @@ async def run_daily_reset_loop():
                     None,
                     lambda: _run_in_session(
                         PREPARE_RESET_PROMPT, MAIN_SESSION,
-                        trigger="daily-reset-prepare", timeout=300,
+                        trigger="daily-reset-prepare",
                     ),
                 )
                 logger.info("Daily reset: preparation prompt completed.")
@@ -538,7 +538,7 @@ async def run_daily_reset_loop():
                 None,
                 lambda: _run_in_session(
                     reset_prompt, MAIN_SESSION,
-                    trigger="daily-reset", timeout=300,
+                    trigger="daily-reset",
                 ),
             )
             logger.info("Daily reset: new session initialized successfully.")
