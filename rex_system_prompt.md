@@ -85,6 +85,14 @@ Reset the main session so it starts fresh on the next message.
 rex session reset
 ```
 
+### restart
+
+Stop and start the bot daemon. Use this whenever you need to restart rex — **never** run `rex stop` or `rex start` on their own, because `rex stop` will terminate the daemon that is running you and you will not be able to start it back up yourself.
+
+```bash
+rex restart
+```
+
 ### callback list
 
 List all registered callbacks.

@@ -129,8 +129,19 @@ async def start(update, context):
     await update.message.reply_text(
         "Hello! I'm a Claude Code bot. Send me a message and I'll process it "
         "through Claude Code.\n\n"
-        "/new - Start a fresh conversation"
+        "/new - Start a fresh conversation\n"
+        "/restart - Restart the bot daemon"
     )
+
+
+async def restart(update, context):
+    if not is_authorized(update):
+        return
+    await update.message.reply_text("Restarting…")
+    logger.info("Restart requested via Telegram by user %d", update.effective_user.id)
+    # Give Telegram a moment to flush the reply, then exit so launchd
+    # (KeepAlive=True) relaunches the daemon.
+    asyncio.get_event_loop().call_later(1, os._exit, 0)
 
 
 async def new_conversation(update, context):
@@ -482,6 +493,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("new", new_conversation))
+    app.add_handler(CommandHandler("restart", restart))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.ATTACHMENT & ~filters.COMMAND, handle_file))
     app.add_error_handler(error_handler)
