@@ -233,6 +233,13 @@ async def handle_voice(update, context):
     if voice is None:
         return
 
+    reason = rex_whisper.unavailable_reason()
+    if reason:
+        await message.reply_text(
+            "I got your voice message, but voice support is off: %s." % reason
+        )
+        return
+
     INBOX_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     src = INBOX_DIR / ("%s-voice-%s.ogg" % (timestamp, voice.file_unique_id))

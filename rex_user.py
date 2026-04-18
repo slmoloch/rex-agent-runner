@@ -126,11 +126,27 @@ def send_voice(text):
         print("Voice message text is empty.", file=sys.stderr)
         sys.exit(1)
 
+    reason = rex_whisper.unavailable_reason()
+    if reason:
+        print(
+            "Voice message not sent: %s.\n"
+            "Fall back to `rex user text` to reach the user with plain text." % reason,
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
         try:
             rex_whisper.synthesize(text, tmp_path)
+        except rex_whisper.VoiceUnavailable as e:
+            print(
+                "Voice message not sent: %s.\n"
+                "Fall back to `rex user text` to reach the user with plain text." % e,
+                file=sys.stderr,
+            )
+            sys.exit(2)
         except Exception as e:
             print("TTS synthesis failed: %s" % e, file=sys.stderr)
             sys.exit(1)

@@ -1,10 +1,14 @@
-"""OpenAI Whisper (STT) and TTS helpers for voice messages."""
+"""OpenAI Whisper (STT) and TTS helpers for voice messages.
+
+The `openai` package and the `openai_api_key` config entry are both
+optional — voice features just become unavailable without them, while
+the rest of rex keeps working. Use `unavailable_reason()` to render a
+user-friendly message explaining why.
+"""
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-
-from openai import OpenAI
 
 from claude_runner import CONFIG
 
@@ -18,13 +22,27 @@ TTS_VOICE = CONFIG.get("tts_voice", "alloy")
 TTS_MAX_CHARS = 4000
 
 
-def _client() -> OpenAI:
-    api_key = CONFIG.get("openai_api_key")
-    if not api_key:
-        raise RuntimeError(
-            "openai_api_key is not configured. Run: rex config setup"
-        )
-    return OpenAI(api_key=api_key)
+class VoiceUnavailable(RuntimeError):
+    """Raised when voice features can't run (missing package or API key)."""
+
+
+def unavailable_reason() -> str | None:
+    """Return a short human-readable reason voice is unavailable, or None."""
+    try:
+        import openai  # noqa: F401
+    except ImportError:
+        return "the `openai` Python package is not installed (run install.sh)"
+    if not CONFIG.get("openai_api_key"):
+        return "the OpenAI API key is not configured (run `rex config setup`)"
+    return None
+
+
+def _client():
+    reason = unavailable_reason()
+    if reason:
+        raise VoiceUnavailable(reason)
+    from openai import OpenAI
+    return OpenAI(api_key=CONFIG["openai_api_key"])
 
 
 def transcribe(path: Path) -> str:
