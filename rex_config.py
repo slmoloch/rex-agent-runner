@@ -68,6 +68,16 @@ def cmd_setup() -> None:
     if openai_input:
         cfg["openai_api_key"] = openai_input
 
+    # TTS voice (OpenAI voices: alloy, echo, fable, onyx, nova, shimmer, coral, sage, ash)
+    current_voice = cfg.get("tts_voice", "nova")
+    voice_input = input(
+        f"TTS voice [alloy|echo|fable|onyx|nova|shimmer|coral|sage|ash] [{current_voice}]: "
+    ).strip()
+    if voice_input:
+        cfg["tts_voice"] = voice_input
+    elif "tts_voice" not in cfg:
+        cfg["tts_voice"] = "nova"
+
     # Job port
     current_port = cfg.get("job_port", 9821)
     port_input = input(f"Job HTTP port [{current_port}]: ").strip()
@@ -105,6 +115,7 @@ def cmd_show() -> None:
     print(f"  allowed_user_ids:    {cfg.get('allowed_user_ids', [])}")
     print(f"  telegram_chat_id:    {cfg.get('telegram_chat_id', '(default)')}")
     print(f"  openai_api_key:      {masked_openai}")
+    print(f"  tts_voice:           {cfg.get('tts_voice', 'nova')}")
     print(f"  job_port:            {cfg.get('job_port', 9821)}")
     print(f"  workspace:           {cfg.get('workspace', './workspace')}")
     print(f"  config file:         {CONFIG_PATH}")
