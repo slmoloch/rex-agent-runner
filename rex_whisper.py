@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 STT_MODEL = CONFIG.get("whisper_model", "whisper-1")
 TTS_MODEL = CONFIG.get("tts_model", "gpt-4o-mini-tts")
-TTS_VOICE = CONFIG.get("tts_voice", "alloy")
+TTS_VOICE = CONFIG.get("tts_voice", "nova")
 
 # OpenAI TTS rejects inputs longer than 4096 chars.
 TTS_MAX_CHARS = 4000
