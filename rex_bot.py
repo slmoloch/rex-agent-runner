@@ -63,6 +63,7 @@ ALLOWED_USER_IDS = set(CONFIG.get("allowed_user_ids", []))
 JOB_PORT = CONFIG.get("job_port", 9821)
 
 WEB_DIR = INSTALL_DIR / "web"
+INBOX_DIR = Path(WORKDIR) / "inbox"
 
 
 def is_authorized(update):
@@ -182,11 +183,104 @@ async def handle_message(update, context):
     finally:
         typing_task.cancel()
 
+    await _send_response(update.message, response)
+
+
+async def _send_response(message, response):
     if len(response) <= 4096:
-        await update.message.reply_text(response)
+        await message.reply_text(response)
     else:
         for i in range(0, len(response), 4096):
-            await update.message.reply_text(response[i : i + 4096])
+            await message.reply_text(response[i : i + 4096])
+
+
+def _pick_file(message):
+    """Return (telegram file-like object, suggested filename) or (None, None)."""
+    if message.document:
+        doc = message.document
+        return doc, doc.file_name or "document-%s" % doc.file_unique_id
+    if message.photo:
+        photo = message.photo[-1]  # largest size
+        return photo, "photo-%s.jpg" % photo.file_unique_id
+    if message.voice:
+        voice = message.voice
+        return voice, "voice-%s.ogg" % voice.file_unique_id
+    if message.audio:
+        audio = message.audio
+        return audio, audio.file_name or "audio-%s.mp3" % audio.file_unique_id
+    if message.video:
+        video = message.video
+        return video, video.file_name or "video-%s.mp4" % video.file_unique_id
+    if message.video_note:
+        vn = message.video_note
+        return vn, "video-note-%s.mp4" % vn.file_unique_id
+    if message.animation:
+        anim = message.animation
+        return anim, anim.file_name or "animation-%s.mp4" % anim.file_unique_id
+    return None, None
+
+
+async def handle_file(update, context):
+    if not is_authorized(update):
+        return
+
+    message = update.message
+    chat = update.effective_chat
+
+    tg_obj, suggested_name = _pick_file(message)
+    if tg_obj is None:
+        await message.reply_text("Unsupported attachment type.")
+        return
+
+    INBOX_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(suggested_name).name
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = INBOX_DIR / ("%s-%s" % (timestamp, safe_name))
+
+    try:
+        tg_file = await tg_obj.get_file()
+        await tg_file.download_to_drive(custom_path=dest)
+    except Exception:
+        logger.exception("Failed to download file from Telegram")
+        await message.reply_text("Sorry, I couldn't download that file.")
+        return
+
+    try:
+        rel_path = dest.relative_to(Path(WORKDIR))
+    except ValueError:
+        rel_path = dest
+    caption = (message.caption or "").strip()
+    size = dest.stat().st_size
+
+    prompt_lines = [
+        "The user sent a file via Telegram.",
+        "Path (relative to workspace): %s" % rel_path,
+        "Size: %d bytes" % size,
+    ]
+    if caption:
+        prompt_lines.append("Caption: %s" % caption)
+    else:
+        prompt_lines.append(
+            "No caption was provided. Inspect the file if appropriate, "
+            "then acknowledge receipt and ask what to do with it."
+        )
+    prompt = "\n".join(prompt_lines)
+
+    typing_task = asyncio.create_task(_keep_typing(chat))
+    try:
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None, lambda: _run_in_session(
+                prompt, MAIN_SESSION, trigger="telegram-file", timeout=300
+            )
+        )
+    except Exception:
+        logger.exception("handle_file failed")
+        response = "Sorry, something went wrong while processing your file."
+    finally:
+        typing_task.cancel()
+
+    await _send_response(message, response)
 
 
 async def _keep_typing(chat):
@@ -389,6 +483,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("new", new_conversation))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.ATTACHMENT & ~filters.COMMAND, handle_file))
     app.add_error_handler(error_handler)
 
     logger.info("Bot started.")
