@@ -55,6 +55,7 @@ Callbacks:
   callback remove <id>                   Remove a callback
   notify <message>                       Send a Telegram notification
   notify --file <path> [caption]         Send a file via Telegram
+  notify --voice <message>               Send a Telegram voice message (TTS)
 EOF
 }
 

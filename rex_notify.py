@@ -116,10 +116,54 @@ def send_file(file_path, caption=None):
         sys.exit(1)
 
 
+def send_voice(text):
+    """Synthesize `text` with OpenAI TTS and send as a Telegram voice message."""
+    import tempfile
+    import rex_whisper
+
+    text = text.strip()
+    if not text:
+        print("Voice message text is empty.", file=sys.stderr)
+        sys.exit(1)
+
+    with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        try:
+            rex_whisper.synthesize(text, tmp_path)
+        except Exception as e:
+            print("TTS synthesis failed: %s" % e, file=sys.stderr)
+            sys.exit(1)
+
+        url = "https://api.telegram.org/bot%s/sendVoice" % TELEGRAM_TOKEN
+        fields = {"chat_id": CHAT_ID}
+        with open(tmp_path, "rb") as f:
+            file_data = f.read()
+        files = {"voice": ("voice.ogg", file_data, "audio/ogg")}
+        body, multipart_ct = _build_multipart(fields, files)
+
+        try:
+            req = urllib.request.Request(url, data=body)
+            req.add_header("Content-Type", multipart_ct)
+            with urllib.request.urlopen(req, context=SSL_CONTEXT) as resp:
+                result = json.loads(resp.read())
+                if result.get("ok"):
+                    print("Voice message sent to chat %s" % CHAT_ID)
+                else:
+                    print("Telegram error: %s" % result, file=sys.stderr)
+                    sys.exit(1)
+        except Exception as e:
+            print("Failed to send voice: %s" % e, file=sys.stderr)
+            sys.exit(1)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: rex notify <message>")
         print("       rex notify --file <path> [caption]")
+        print("       rex notify --voice <message>")
         sys.exit(1)
 
     if sys.argv[1] == "--file":
@@ -128,5 +172,10 @@ if __name__ == "__main__":
             sys.exit(1)
         caption = " ".join(sys.argv[3:]) if len(sys.argv) > 3 else None
         send_file(sys.argv[2], caption=caption)
+    elif sys.argv[1] == "--voice":
+        if len(sys.argv) < 3:
+            print("Usage: rex notify --voice <message>", file=sys.stderr)
+            sys.exit(1)
+        send_voice(" ".join(sys.argv[2:]))
     else:
         send(" ".join(sys.argv[1:]))
