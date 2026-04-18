@@ -53,9 +53,9 @@ Callbacks:
   callback create "<prompt>" [options]   Create a callback
   callback execute <id>                  Execute a callback
   callback remove <id>                   Remove a callback
-  notify <message>                       Send a Telegram notification
-  notify --file <path> [caption]         Send a file via Telegram
-  notify --voice <message>               Send a Telegram voice message (TTS)
+  send <message>                         Send a Telegram text message
+  send --file <path> [caption]           Send a file via Telegram
+  send --voice <message>                 Send a Telegram voice message (TTS)
 EOF
 }
 
@@ -114,9 +114,9 @@ case "$cmd" in
         load_project_dir
         exec "$PYTHON" "$INSTALL_DIR/rex_callback.py" "$@"
         ;;
-    notify)
+    send)
         load_project_dir
-        exec "$PYTHON" "$INSTALL_DIR/rex_notify.py" "$@"
+        exec "$PYTHON" "$INSTALL_DIR/rex_send.py" "$@"
         ;;
     help|-h|--help)
         usage

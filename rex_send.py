@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send a Telegram notification to the user."""
+"""Send a Telegram message, file, or voice note to the user."""
 from __future__ import annotations
 
 import json
@@ -161,20 +161,20 @@ def send_voice(text):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: rex notify <message>")
-        print("       rex notify --file <path> [caption]")
-        print("       rex notify --voice <message>")
+        print("Usage: rex send <message>")
+        print("       rex send --file <path> [caption]")
+        print("       rex send --voice <message>")
         sys.exit(1)
 
     if sys.argv[1] == "--file":
         if len(sys.argv) < 3:
-            print("Usage: rex notify --file <path> [caption]", file=sys.stderr)
+            print("Usage: rex send --file <path> [caption]", file=sys.stderr)
             sys.exit(1)
         caption = " ".join(sys.argv[3:]) if len(sys.argv) > 3 else None
         send_file(sys.argv[2], caption=caption)
     elif sys.argv[1] == "--voice":
         if len(sys.argv) < 3:
-            print("Usage: rex notify --voice <message>", file=sys.stderr)
+            print("Usage: rex send --voice <message>", file=sys.stderr)
             sys.exit(1)
         send_voice(" ".join(sys.argv[2:]))
     else:
