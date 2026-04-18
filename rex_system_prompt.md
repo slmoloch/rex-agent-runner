@@ -29,6 +29,8 @@ rex user text "Your message here"
 rex user voice "Your spoken reply here"
 ```
 
+After calling `rex user voice`, do NOT follow up with a confirmation like "Voice reply sent" or "Sent." — the voice message IS the reply. Just end your turn silently.
+
 **Send a file (with optional caption):**
 ```bash
 rex user file /path/to/file
