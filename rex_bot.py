@@ -222,24 +222,23 @@ def _pick_file(message):
 
 
 async def handle_voice(update, context):
-    """Transcribe voice/audio messages with Whisper, run through Claude,
+    """Transcribe voice notes with Whisper, run through Claude,
     and reply with a synthesized voice message."""
     if not is_authorized(update):
         return
 
     message = update.message
     chat = update.effective_chat
-    tg_obj = message.voice or message.audio
-    if tg_obj is None:
+    voice = message.voice
+    if voice is None:
         return
 
     INBOX_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    suffix = ".ogg" if message.voice else ".mp3"
-    src = INBOX_DIR / ("%s-voice-%s%s" % (timestamp, tg_obj.file_unique_id, suffix))
+    src = INBOX_DIR / ("%s-voice-%s.ogg" % (timestamp, voice.file_unique_id))
 
     try:
-        tg_file = await tg_obj.get_file()
+        tg_file = await voice.get_file()
         await tg_file.download_to_drive(custom_path=src)
     except Exception:
         logger.exception("Failed to download voice message")
@@ -256,7 +255,17 @@ async def handle_voice(update, context):
         logger.info("Voice transcript: %s", transcript[:300])
 
         caption = (message.caption or "").strip()
-        prompt = transcript if not caption else "%s\n\n(Caption: %s)" % (transcript, caption)
+        prompt_lines = [
+            "The user sent a Telegram voice message, transcribed below via Whisper.",
+            "Reply conversationally — your response will be synthesized back to audio "
+            "and sent as a voice reply, so keep it concise and suitable for speech "
+            "(no markdown, code blocks, or long lists).",
+            "",
+            "Transcript: %s" % transcript,
+        ]
+        if caption:
+            prompt_lines.append("Caption: %s" % caption)
+        prompt = "\n".join(prompt_lines)
 
         response = await loop.run_in_executor(
             None, lambda: _run_in_session(
@@ -270,7 +279,7 @@ async def handle_voice(update, context):
     finally:
         typing_task.cancel()
 
-    reply_path = INBOX_DIR / ("%s-reply-%s.ogg" % (timestamp, tg_obj.file_unique_id))
+    reply_path = INBOX_DIR / ("%s-reply-%s.ogg" % (timestamp, voice.file_unique_id))
     try:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, lambda: rex_whisper.synthesize(response, reply_path))
@@ -544,7 +553,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("new", new_conversation))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler((filters.VOICE | filters.AUDIO) & ~filters.COMMAND, handle_voice))
+    app.add_handler(MessageHandler(filters.VOICE & ~filters.COMMAND, handle_voice))
     app.add_handler(MessageHandler(filters.ATTACHMENT & ~filters.COMMAND, handle_file))
     app.add_error_handler(error_handler)
 
