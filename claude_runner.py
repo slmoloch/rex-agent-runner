@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import selectors
 import shutil
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -69,17 +71,69 @@ if AGENT_PROMPT_PATH.exists():
 SYSTEM_PROMPT = "\n\n".join(_parts)
 
 
+DEFAULT_IDLE_TIMEOUT = 600  # seconds of no stream output before we consider Claude stuck
+DEFAULT_MAX_TIMEOUT: int | None = None  # no absolute wall-clock cap by default
+
+
+def _parse_event(line: str, state: dict) -> None:
+    """Parse one stream-json line and update state dict in-place."""
+    if not line.strip():
+        return
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return
+
+    etype = event.get("type")
+
+    if etype == "result":
+        state["response_text"] = event.get("result", "")
+        state["session_id"] = event.get("session_id", state.get("session_id"))
+        state["cost"] = event.get("total_cost_usd", 0)
+        state["turns"] = event.get("num_turns", 0)
+        state["duration"] = event.get("duration_ms", 0)
+        logger.info(
+            "Result: turns=%d, duration=%dms, cost=$%.4f",
+            state["turns"], state["duration"], state["cost"],
+        )
+    elif etype == "assistant":
+        message = event.get("message", {})
+        for block in message.get("content", []):
+            if block.get("type") == "tool_use":
+                logger.info(
+                    "Tool: %s(%s)",
+                    block.get("name"),
+                    json.dumps(block.get("input", {}))[:200],
+                )
+            elif block.get("type") == "text":
+                text = block.get("text", "")
+                if text:
+                    logger.info("Claude: %s", text[:300])
+
+
 def run_claude(
     prompt: str,
     session_id: str | None = None,
     system_prompt: str | None = None,
-    timeout: int = 300,
+    timeout: int | None = None,
+    idle_timeout: int | None = None,
 ) -> dict:
     """Run claude CLI and return a result dict.
+
+    Activity is measured by lines arriving on the stream-json stdout. Each tool
+    call, assistant text block, or result event resets the idle clock, so a
+    long-running turn that is actively doing work won't be killed. If no output
+    arrives for `idle_timeout` seconds we assume the process is stuck and kill
+    it. `timeout` is an absolute wall-clock cap (None = unlimited).
 
     Returns: {"response": str, "session_id": str|None,
               "cost_usd": float, "duration_ms": int, "num_turns": int}
     """
+    if idle_timeout is None:
+        idle_timeout = DEFAULT_IDLE_TIMEOUT
+    if timeout is None:
+        timeout = DEFAULT_MAX_TIMEOUT
+
     cmd = [
         CLAUDE_BIN, "-p", prompt,
         "--output-format", "stream-json", "--verbose",
@@ -100,72 +154,107 @@ def run_claude(
     if session_id:
         env["REX_SESSION_ID"] = session_id
 
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=WORKDIR,
+        env=env,
+        bufsize=0,
+    )
+
+    state: dict = {
+        "response_text": "",
+        "session_id": session_id,
+        "cost": 0,
+        "turns": 0,
+        "duration": 0,
+    }
+    stdout_buf = b""
+    stderr_chunks: list[bytes] = []
+
+    sel = selectors.DefaultSelector()
+    sel.register(proc.stdout, selectors.EVENT_READ, "stdout")
+    sel.register(proc.stderr, selectors.EVENT_READ, "stderr")
+    open_streams = 2
+
+    start = time.monotonic()
+    last_activity = start
+    timeout_reason: str | None = None
+
+    # Poll in short slices so we can detect idleness / total-timeout while
+    # still streaming as events arrive.
+    poll_interval = min(5.0, max(1.0, idle_timeout / 10))
+
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=WORKDIR,
-            timeout=timeout,
-            env=env,
-        )
-    except subprocess.TimeoutExpired:
-        logger.error("claude timed out after %d seconds", timeout)
+        while open_streams > 0:
+            now = time.monotonic()
+            idle_for = now - last_activity
+            elapsed = now - start
+            if idle_for > idle_timeout:
+                timeout_reason = (
+                    "no output for %ds (idle_timeout=%ds)" % (int(idle_for), idle_timeout)
+                )
+                break
+            if timeout is not None and elapsed > timeout:
+                timeout_reason = "exceeded max timeout of %ds" % timeout
+                break
+
+            events = sel.select(timeout=poll_interval)
+            if not events:
+                logger.debug("Claude still running: elapsed=%ds idle=%ds", int(elapsed), int(idle_for))
+                continue
+
+            for key, _ in events:
+                chunk = key.fileobj.read1(65536) if hasattr(key.fileobj, "read1") else os.read(key.fileobj.fileno(), 65536)
+                if not chunk:
+                    sel.unregister(key.fileobj)
+                    open_streams -= 1
+                    continue
+                last_activity = time.monotonic()
+                if key.data == "stdout":
+                    stdout_buf += chunk
+                    while b"\n" in stdout_buf:
+                        raw_line, stdout_buf = stdout_buf.split(b"\n", 1)
+                        _parse_event(raw_line.decode("utf-8", errors="replace"), state)
+                else:
+                    stderr_chunks.append(chunk)
+    finally:
+        sel.close()
+
+    if timeout_reason:
+        logger.error("claude killed: %s", timeout_reason)
+        proc.kill()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.error("claude did not exit after SIGKILL")
         return {
-            "response": "Error: Claude timed out after %d seconds." % timeout,
+            "response": "Error: Claude killed (%s)." % timeout_reason,
             "session_id": session_id,
             "cost_usd": 0, "duration_ms": 0, "num_turns": 0,
         }
 
-    if result.returncode != 0:
-        stderr = result.stderr.strip()
-        stdout = result.stdout.strip()
-        logger.error("claude exited %d: stderr=%s stdout=%s", result.returncode, stderr, stdout[:500])
-        error_msg = stderr or stdout or "claude exited with code %d" % result.returncode
+    returncode = proc.wait()
+
+    # Drain any trailing partial line
+    if stdout_buf.strip():
+        _parse_event(stdout_buf.decode("utf-8", errors="replace"), state)
+
+    if returncode != 0:
+        stderr = b"".join(stderr_chunks).decode("utf-8", errors="replace").strip()
+        logger.error("claude exited %d: stderr=%s", returncode, stderr[:500])
+        error_msg = stderr or "claude exited with code %d" % returncode
         return {
             "response": "Error: %s" % error_msg,
             "session_id": session_id,
             "cost_usd": 0, "duration_ms": 0, "num_turns": 0,
         }
 
-    response_text = ""
-    new_session_id = session_id
-    cost = 0
-    turns = 0
-    duration = 0
-
-    for line in result.stdout.splitlines():
-        if not line.strip():
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        etype = event.get("type")
-
-        if etype == "result":
-            response_text = event.get("result", "")
-            new_session_id = event.get("session_id", session_id)
-            cost = event.get("total_cost_usd", 0)
-            turns = event.get("num_turns", 0)
-            duration = event.get("duration_ms", 0)
-            logger.info("Result: turns=%d, duration=%dms, cost=$%.4f", turns, duration, cost)
-
-        elif etype == "assistant":
-            message = event.get("message", {})
-            for block in message.get("content", []):
-                if block.get("type") == "tool_use":
-                    logger.info("Tool: %s(%s)", block.get("name"), json.dumps(block.get("input", {}))[:200])
-                elif block.get("type") == "text":
-                    text = block.get("text", "")
-                    if text:
-                        logger.info("Claude: %s", text[:300])
-
     return {
-        "response": response_text,
-        "session_id": new_session_id,
-        "cost_usd": cost,
-        "duration_ms": duration,
-        "num_turns": turns,
+        "response": state["response_text"],
+        "session_id": state["session_id"],
+        "cost_usd": state["cost"],
+        "duration_ms": state["duration"],
+        "num_turns": state["turns"],
     }
