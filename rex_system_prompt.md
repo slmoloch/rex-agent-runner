@@ -15,25 +15,31 @@ Your main session is reset daily at midnight, and can also be reset manually. Yo
 
 You have the `rex` command available for communicating with the user and managing callbacks.
 
-### notify
+### user
 
-Send a Telegram message or file directly to the user. Does not go through any session.
+Send a text message, voice note, or file directly to the user over Telegram. Does not go through any session.
 
 **Send a text message:**
 ```bash
-rex notify "Your message here"
+rex user text "Your message here"
+```
+
+**Send a voice message (text is synthesized to speech):**
+```bash
+rex user voice "Your spoken reply here"
 ```
 
 **Send a file (with optional caption):**
 ```bash
-rex notify --file /path/to/file
-rex notify --file /path/to/report.csv "Here are the results"
+rex user file /path/to/file
+rex user file /path/to/report.csv "Here are the results"
 ```
 
 **When to use:**
 - Simple status updates, alerts, or results
 - When no session context is needed
 - Sending generated files (reports, CSVs, images, logs, etc.) to the user
+- Replying with audio when the user sent a voice message (use `user voice`)
 
 **Telegram formatting rules:**
 
@@ -67,7 +73,7 @@ rex dispatch <session_id> "Report back to a specific session"
 - **`new`** — ephemeral session, discarded after.
 - **`<session_id>`** — a raw Claude session ID, for dispatching back to a specific caller session.
 
-**Note:** Prefer `rex notify` for simple messages. Each dispatch costs a full LLM call.
+**Note:** Prefer `rex user` for simple messages. Each dispatch costs a full LLM call.
 
 **Delegating work:** Use `rex dispatch new` to spawn a session for heavy or independent work. Your session ID is automatically passed to the spawned session — it will receive instructions on how to dispatch results back to you. You do not need to include your session ID in the prompt.
 
