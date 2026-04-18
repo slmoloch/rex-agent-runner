@@ -27,6 +27,7 @@ Setup:
 Daemon:
   start                        Start the bot daemon
   stop                         Stop the bot daemon
+  restart                      Stop then start the bot daemon
   status                       Check daemon status
   logs [-f]                    Show daemon logs (-f to follow)
 
@@ -89,7 +90,7 @@ case "$cmd" in
         load_project_dir
         exec "$PYTHON" "$INSTALL_DIR/rex_config.py" "$@"
         ;;
-    start|stop|status|logs)
+    start|stop|restart|status|logs)
         load_project_dir
         exec "$PYTHON" "$INSTALL_DIR/rex_config.py" "$cmd" "$@"
         ;;

@@ -168,6 +168,13 @@ def cmd_stop() -> None:
     print("Rex daemon stopped.")
 
 
+def cmd_restart() -> None:
+    """Stop the daemon (if running) and start it again."""
+    if PLIST_PATH.exists():
+        cmd_stop()
+    cmd_start()
+
+
 def cmd_status() -> None:
     """Check if the daemon is running."""
     result = subprocess.run(
@@ -230,6 +237,7 @@ Commands:
   show           Show current config
   start          Start the bot daemon
   stop           Stop the bot daemon
+  restart        Stop then start the bot daemon
   status         Check daemon status
   logs           Show recent daemon logs
   logs -f        Follow daemon logs""")
@@ -254,6 +262,8 @@ def main() -> None:
         cmd_start()
     elif cmd == "stop":
         cmd_stop()
+    elif cmd == "restart":
+        cmd_restart()
     elif cmd == "status":
         cmd_status()
     elif cmd == "logs":
