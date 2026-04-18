@@ -61,6 +61,13 @@ def cmd_setup() -> None:
     elif not current_chat and default_chat:
         cfg["telegram_chat_id"] = int(default_chat)
 
+    # OpenAI API key (for Whisper transcription + TTS on voice messages)
+    current_openai = cfg.get("openai_api_key", "")
+    masked_openai = current_openai[:8] + "..." if current_openai else "(not set)"
+    openai_input = input(f"OpenAI API key (for voice messages) [{masked_openai}]: ").strip()
+    if openai_input:
+        cfg["openai_api_key"] = openai_input
+
     # Job port
     current_port = cfg.get("job_port", 9821)
     port_input = input(f"Job HTTP port [{current_port}]: ").strip()
@@ -91,9 +98,13 @@ def cmd_show() -> None:
     token = cfg.get("telegram_bot_token", "")
     masked = token[:8] + "..." + token[-4:] if len(token) > 12 else "(not set)"
 
+    openai_key = cfg.get("openai_api_key", "")
+    masked_openai = openai_key[:8] + "..." + openai_key[-4:] if len(openai_key) > 12 else "(not set)"
+
     print(f"  telegram_bot_token:  {masked}")
     print(f"  allowed_user_ids:    {cfg.get('allowed_user_ids', [])}")
     print(f"  telegram_chat_id:    {cfg.get('telegram_chat_id', '(default)')}")
+    print(f"  openai_api_key:      {masked_openai}")
     print(f"  job_port:            {cfg.get('job_port', 9821)}")
     print(f"  workspace:           {cfg.get('workspace', './workspace')}")
     print(f"  config file:         {CONFIG_PATH}")

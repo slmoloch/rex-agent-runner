@@ -32,6 +32,7 @@ from rex_session import (
 from rex_events import append_event
 from rex_timeline import init_db, query_events
 from rex_gc import mark_running, mark_stopped, run_gc_loop, is_running
+import rex_whisper
 
 _BASE_DIR = Path(os.environ["REX_PROJECT_DIR"]) if "REX_PROJECT_DIR" in os.environ else INSTALL_DIR
 _LOG_DIR = _BASE_DIR / "logs"
@@ -218,6 +219,66 @@ def _pick_file(message):
         anim = message.animation
         return anim, anim.file_name or "animation-%s.mp4" % anim.file_unique_id
     return None, None
+
+
+async def handle_voice(update, context):
+    """Transcribe voice/audio messages with Whisper, run through Claude,
+    and reply with a synthesized voice message."""
+    if not is_authorized(update):
+        return
+
+    message = update.message
+    chat = update.effective_chat
+    tg_obj = message.voice or message.audio
+    if tg_obj is None:
+        return
+
+    INBOX_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    suffix = ".ogg" if message.voice else ".mp3"
+    src = INBOX_DIR / ("%s-voice-%s%s" % (timestamp, tg_obj.file_unique_id, suffix))
+
+    try:
+        tg_file = await tg_obj.get_file()
+        await tg_file.download_to_drive(custom_path=src)
+    except Exception:
+        logger.exception("Failed to download voice message")
+        await message.reply_text("Sorry, I couldn't download that voice message.")
+        return
+
+    typing_task = asyncio.create_task(_keep_typing(chat))
+    try:
+        loop = asyncio.get_event_loop()
+        transcript = await loop.run_in_executor(None, lambda: rex_whisper.transcribe(src))
+        if not transcript:
+            await message.reply_text("Sorry, I couldn't understand that audio.")
+            return
+        logger.info("Voice transcript: %s", transcript[:300])
+
+        caption = (message.caption or "").strip()
+        prompt = transcript if not caption else "%s\n\n(Caption: %s)" % (transcript, caption)
+
+        response = await loop.run_in_executor(
+            None, lambda: _run_in_session(
+                prompt, MAIN_SESSION, trigger="telegram-voice", timeout=300
+            )
+        )
+    except Exception:
+        logger.exception("handle_voice failed")
+        await message.reply_text("Sorry, something went wrong processing your voice message.")
+        return
+    finally:
+        typing_task.cancel()
+
+    reply_path = INBOX_DIR / ("%s-reply-%s.ogg" % (timestamp, tg_obj.file_unique_id))
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: rex_whisper.synthesize(response, reply_path))
+        with open(reply_path, "rb") as fh:
+            await message.reply_voice(voice=fh)
+    except Exception:
+        logger.exception("TTS synthesis failed; falling back to text")
+        await _send_response(message, response)
 
 
 async def handle_file(update, context):
@@ -483,6 +544,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("new", new_conversation))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler((filters.VOICE | filters.AUDIO) & ~filters.COMMAND, handle_voice))
     app.add_handler(MessageHandler(filters.ATTACHMENT & ~filters.COMMAND, handle_file))
     app.add_error_handler(error_handler)
 
