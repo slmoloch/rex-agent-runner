@@ -206,7 +206,7 @@ def cmd_execute(callback_id):
     cb = callbacks[callback_id]
     prompt = (
         "This is a scheduled message. Process the following message or request. "
-        "Use `rex send` if the user needs to be notified. "
+        "Use `rex user text` if the user needs to be notified. "
         "Keep quiet otherwise.\n\n"
         + cb["prompt"]
     )

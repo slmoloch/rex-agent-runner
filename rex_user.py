@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send a Telegram message, file, or voice note to the user."""
+"""Send a text, voice, or file message to the user via Telegram."""
 from __future__ import annotations
 
 import json
@@ -159,23 +159,39 @@ def send_voice(text):
         tmp_path.unlink(missing_ok=True)
 
 
+def _usage():
+    print("Usage: rex user text <message>")
+    print("       rex user voice <message>")
+    print("       rex user file <path> [caption]")
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: rex send <message>")
-        print("       rex send --file <path> [caption]")
-        print("       rex send --voice <message>")
+        _usage()
         sys.exit(1)
 
-    if sys.argv[1] == "--file":
-        if len(sys.argv) < 3:
-            print("Usage: rex send --file <path> [caption]", file=sys.stderr)
+    sub = sys.argv[1]
+    args = sys.argv[2:]
+
+    if sub == "text":
+        if not args:
+            print("Usage: rex user text <message>", file=sys.stderr)
             sys.exit(1)
-        caption = " ".join(sys.argv[3:]) if len(sys.argv) > 3 else None
-        send_file(sys.argv[2], caption=caption)
-    elif sys.argv[1] == "--voice":
-        if len(sys.argv) < 3:
-            print("Usage: rex send --voice <message>", file=sys.stderr)
+        send(" ".join(args))
+    elif sub == "voice":
+        if not args:
+            print("Usage: rex user voice <message>", file=sys.stderr)
             sys.exit(1)
-        send_voice(" ".join(sys.argv[2:]))
+        send_voice(" ".join(args))
+    elif sub == "file":
+        if not args:
+            print("Usage: rex user file <path> [caption]", file=sys.stderr)
+            sys.exit(1)
+        caption = " ".join(args[1:]) if len(args) > 1 else None
+        send_file(args[0], caption=caption)
+    elif sub in ("help", "-h", "--help"):
+        _usage()
     else:
-        send(" ".join(sys.argv[1:]))
+        print("Unknown subcommand: %s" % sub, file=sys.stderr)
+        _usage()
+        sys.exit(1)
