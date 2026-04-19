@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 import logging.handlers
 import os
+import re
 from pathlib import Path
 from aiohttp import web
 from telegram import Update
@@ -75,12 +76,32 @@ def is_authorized(update):
     return True
 
 
+_REX_USER_RE = re.compile(r"\brex\s+user\s+(text|voice|file)\b")
+
+
+def _tools_used_rex_user(tools):
+    """True if the turn invoked any `rex user ...` command via Bash."""
+    for tool in tools or []:
+        if tool.get("name") != "Bash":
+            continue
+        raw = tool.get("input", "")
+        if not isinstance(raw, str):
+            raw = json.dumps(raw)
+        if _REX_USER_RE.search(raw):
+            return True
+    return False
+
+
 def _run_in_session(prompt, session_target, trigger, timeout=None, caller_session=None):
     """Run a Claude prompt in the given session target and log the event.
 
     session_target: "main" (persistent), "new" (ephemeral), or a raw session ID.
     trigger: source of the prompt (e.g. "telegram", "callback:name", "dispatch").
     caller_session: session ID of the caller (for dispatch tracking).
+
+    Returns: (response_text, used_rex_user). `used_rex_user` is True when the
+    turn already delivered its reply through `rex user`, in which case callers
+    should suppress the fallback response text.
     """
     session_id = resolve_session_id(session_target)
 
@@ -122,7 +143,7 @@ def _run_in_session(prompt, session_target, trigger, timeout=None, caller_sessio
         event["caller_session"] = caller_session
     append_event(event)
 
-    return result["response"]
+    return result["response"], _tools_used_rex_user(result.get("tools", []))
 
 
 async def start(update, context):
@@ -183,9 +204,10 @@ async def handle_message(update, context):
     # Telegram's typing indicator expires after ~5s; re-send it every 4s
     # until the Claude run finishes.
     typing_task = asyncio.create_task(_keep_typing(chat))
+    used_rex_user = False
     try:
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
+        response, used_rex_user = await loop.run_in_executor(
             None, lambda: _run_in_session(
                 update.message.text, MAIN_SESSION, trigger="telegram"
             )
@@ -196,7 +218,12 @@ async def handle_message(update, context):
     finally:
         typing_task.cancel()
 
-    await _send_response(update.message, response)
+    if used_rex_user:
+        # The agent already delivered the reply via `rex user` — the final
+        # turn text is just a fallback and shouldn't be sent as a duplicate.
+        return
+    if response:
+        await _send_response(update.message, response)
 
 
 async def _send_response(message, response):
@@ -286,7 +313,7 @@ async def handle_voice(update, context):
             prompt_lines.append("Caption: %s" % caption)
         prompt = "\n".join(prompt_lines)
 
-        response = await loop.run_in_executor(
+        response, used_rex_user = await loop.run_in_executor(
             None, lambda: _run_in_session(
                 prompt, MAIN_SESSION, trigger="telegram-voice", timeout=300
             )
@@ -297,6 +324,12 @@ async def handle_voice(update, context):
         return
     finally:
         typing_task.cancel()
+
+    if used_rex_user:
+        # The agent already replied via `rex user` — don't synthesize a duplicate.
+        return
+    if not response:
+        return
 
     reply_path = INBOX_DIR / ("%s-reply-%s.ogg" % (timestamp, voice.file_unique_id))
     try:
@@ -356,9 +389,10 @@ async def handle_file(update, context):
     prompt = "\n".join(prompt_lines)
 
     typing_task = asyncio.create_task(_keep_typing(chat))
+    used_rex_user = False
     try:
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
+        response, used_rex_user = await loop.run_in_executor(
             None, lambda: _run_in_session(
                 prompt, MAIN_SESSION, trigger="telegram-file"
             )
@@ -369,7 +403,10 @@ async def handle_file(update, context):
     finally:
         typing_task.cancel()
 
-    await _send_response(message, response)
+    if used_rex_user:
+        return
+    if response:
+        await _send_response(message, response)
 
 
 async def _keep_typing(chat):
@@ -406,7 +443,7 @@ async def handle_job_request(request):
     logger.info("Job received: %s (session: %s)", job_name, session_target)
 
     loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(
+    response, _ = await loop.run_in_executor(
         None, lambda: _run_in_session(
             prompt, session_target, trigger=job_name,
             caller_session=caller_session,
