@@ -45,7 +45,8 @@ CLAUDE_BIN = _find_claude()
 REX_PROMPT_PATH = INSTALL_DIR / "rex_system_prompt.md"
 AGENT_PROMPT_PATH = Path(WORKDIR) / "AGENT.md"
 SKILLS_DIR = Path(WORKDIR) / "skills"
-TURN_MARKER_DIR = Path(WORKDIR) / ".rex-turn-markers"
+REX_DIR = Path(WORKDIR) / ".rex"
+TURN_MARKER_DIR = REX_DIR / "turn-markers"
 
 
 def _load_skills_content() -> str:
@@ -81,7 +82,7 @@ def _drain_turn_markers(turn_id: str) -> list[dict]:
     """Read and delete the marker file written by `rex user` calls.
 
     Each successful `rex user` invocation appends one JSON line to
-    <workspace>/.rex-turn-markers/<turn_id>.jsonl. We read it, delete it,
+    <workspace>/.rex/turn-markers/<turn_id>.jsonl. We read it, delete it,
     and return the parsed list of sends so the caller can decide whether
     to suppress the fallback response and can log what was delivered.
     """

@@ -29,7 +29,8 @@ TELEGRAM_TOKEN = CONFIG["telegram_bot_token"]
 CHAT_ID = CONFIG.get("telegram_chat_id", CONFIG["allowed_user_ids"][0])
 
 WORKDIR = (BASE_DIR / CONFIG.get("workspace", "./workspace")).resolve()
-MARKER_DIR = WORKDIR / ".rex-turn-markers"
+REX_DIR = WORKDIR / ".rex"
+MARKER_DIR = REX_DIR / "turn-markers"
 
 
 def _log_send(mode, payload):
