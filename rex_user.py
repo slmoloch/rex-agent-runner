@@ -28,6 +28,30 @@ with open(CONFIG_PATH) as f:
 TELEGRAM_TOKEN = CONFIG["telegram_bot_token"]
 CHAT_ID = CONFIG.get("telegram_chat_id", CONFIG["allowed_user_ids"][0])
 
+WORKDIR = (BASE_DIR / CONFIG.get("workspace", "./workspace")).resolve()
+MARKER_DIR = WORKDIR / ".rex-turn-markers"
+
+
+def _log_send(mode, payload):
+    """Record a successful send to this turn's marker file.
+
+    The bot generates REX_TURN_ID per Claude invocation. When present, we
+    append one JSON line per successful send so the bot can (a) know the
+    agent already delivered its reply, and (b) log what was sent.
+    """
+    turn_id = os.environ.get("REX_TURN_ID")
+    if not turn_id:
+        return
+    try:
+        MARKER_DIR.mkdir(parents=True, exist_ok=True)
+        entry = {"mode": mode}
+        entry.update(payload)
+        with open(MARKER_DIR / ("%s.jsonl" % turn_id), "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        # Never let marker I/O break the actual send.
+        print("Warning: failed to write turn marker: %s" % e, file=sys.stderr)
+
 
 def _build_multipart(fields, files):
     """Build a multipart/form-data body from fields and files.
@@ -71,6 +95,7 @@ def send(message):
         with urllib.request.urlopen(req, context=SSL_CONTEXT) as resp:
             result = json.loads(resp.read())
             if result.get("ok"):
+                _log_send("text", {"message": message})
                 print("Message sent to chat %s" % CHAT_ID)
             else:
                 print("Telegram error: %s" % result, file=sys.stderr)
@@ -107,6 +132,10 @@ def send_file(file_path, caption=None):
         with urllib.request.urlopen(req, context=SSL_CONTEXT) as resp:
             result = json.loads(resp.read())
             if result.get("ok"):
+                payload = {"path": str(file_path)}
+                if caption:
+                    payload["caption"] = caption
+                _log_send("file", payload)
                 print("File sent to chat %s: %s" % (CHAT_ID, file_path.name))
             else:
                 print("Telegram error: %s" % result, file=sys.stderr)
@@ -164,6 +193,7 @@ def send_voice(text):
             with urllib.request.urlopen(req, context=SSL_CONTEXT) as resp:
                 result = json.loads(resp.read())
                 if result.get("ok"):
+                    _log_send("voice", {"message": text})
                     print("Voice message sent to chat %s" % CHAT_ID)
                 else:
                     print("Telegram error: %s" % result, file=sys.stderr)
