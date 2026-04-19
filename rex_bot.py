@@ -116,6 +116,7 @@ def _run_in_session(prompt, session_target, trigger, timeout=None, caller_sessio
         "cost_usd": result["cost_usd"],
         "duration_ms": result["duration_ms"],
         "num_turns": result["num_turns"],
+        "tools": result.get("tools", []),
     }
     if caller_session:
         event["caller_session"] = caller_session
@@ -438,13 +439,6 @@ async def handle_sessions_api(request):
     return web.json_response(sessions)
 
 
-async def handle_dashboard(request):
-    index_path = WEB_DIR / "index.html"
-    if not index_path.exists():
-        return web.Response(text="Dashboard not found.", status=404)
-    return web.FileResponse(index_path)
-
-
 async def handle_timeline(request):
     path = WEB_DIR / "timeline.html"
     if not path.exists():
@@ -454,8 +448,7 @@ async def handle_timeline(request):
 
 async def run_http_server():
     app = web.Application()
-    app.router.add_get("/", handle_dashboard)
-    app.router.add_get("/timeline", handle_timeline)
+    app.router.add_get("/", handle_timeline)
     app.router.add_static("/static", WEB_DIR, show_index=False)
     app.router.add_get("/api/events", handle_events_api)
     app.router.add_get("/api/sessions", handle_sessions_api)
@@ -464,7 +457,7 @@ async def run_http_server():
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", JOB_PORT)
     await site.start()
-    logger.info("Dashboard: http://127.0.0.1:%d/", JOB_PORT)
+    logger.info("Timeline: http://127.0.0.1:%d/", JOB_PORT)
 
 
 DAILY_RESET_POLL_SECONDS = 10  # how often to check if session is inactive

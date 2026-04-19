@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS events (
     cost_usd REAL,
     duration_ms INTEGER,
     num_turns INTEGER,
-    caller_session TEXT
+    caller_session TEXT,
+    tools TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_sid ON events(session_id);
@@ -40,7 +41,23 @@ _COLUMNS = (
     "timestamp", "session", "session_id", "trigger",
     "prompt_preview", "response_preview",
     "cost_usd", "duration_ms", "num_turns", "caller_session",
+    "tools",
 )
+
+
+def _encode_col(col: str, value):
+    if col == "tools" and value is not None and not isinstance(value, str):
+        return json.dumps(value)
+    return value
+
+
+def _decode_col(col: str, value):
+    if col == "tools" and isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return value
 
 
 def _connect() -> sqlite3.Connection:
@@ -54,11 +71,15 @@ def _connect() -> sqlite3.Connection:
 def init_db() -> None:
     conn = _connect()
     conn.executescript(_SCHEMA)
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(events)").fetchall()}
+    if "tools" not in existing:
+        conn.execute("ALTER TABLE events ADD COLUMN tools TEXT")
+    conn.commit()
     conn.close()
 
 
 def insert_event(event: dict) -> None:
-    vals = tuple(event.get(c) for c in _COLUMNS)
+    vals = tuple(_encode_col(c, event.get(c)) for c in _COLUMNS)
     conn = _connect()
     try:
         conn.execute(
@@ -94,7 +115,7 @@ def query_events(days: int = 7, since: str | None = None) -> list[dict]:
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = {}
     for c in _COLUMNS:
-        v = row[c]
+        v = _decode_col(c, row[c])
         if v is not None:
             d[c] = v
     return d
@@ -136,7 +157,7 @@ def rebuild_from_logs() -> int:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                vals = tuple(event.get(c) for c in _COLUMNS)
+                vals = tuple(_encode_col(c, event.get(c)) for c in _COLUMNS)
                 conn.execute(insert_sql, vals)
                 count += 1
 

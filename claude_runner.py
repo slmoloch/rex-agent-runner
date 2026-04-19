@@ -100,10 +100,11 @@ def _parse_event(line: str, state: dict) -> None:
         message = event.get("message", {})
         for block in message.get("content", []):
             if block.get("type") == "tool_use":
-                logger.info(
-                    "Tool: %s(%s)",
-                    block.get("name"),
-                    json.dumps(block.get("input", {}))[:200],
+                name = block.get("name")
+                input_preview = json.dumps(block.get("input", {}))[:500]
+                logger.info("Tool: %s(%s)", name, input_preview[:200])
+                state.setdefault("tools", []).append(
+                    {"name": name, "input": input_preview}
                 )
             elif block.get("type") == "text":
                 text = block.get("text", "")
@@ -169,6 +170,7 @@ def run_claude(
         "cost": 0,
         "turns": 0,
         "duration": 0,
+        "tools": [],
     }
     stdout_buf = b""
     stderr_chunks: list[bytes] = []
@@ -233,6 +235,7 @@ def run_claude(
             "response": "Error: Claude killed (%s)." % timeout_reason,
             "session_id": session_id,
             "cost_usd": 0, "duration_ms": 0, "num_turns": 0,
+            "tools": state["tools"],
         }
 
     returncode = proc.wait()
@@ -249,6 +252,7 @@ def run_claude(
             "response": "Error: %s" % error_msg,
             "session_id": session_id,
             "cost_usd": 0, "duration_ms": 0, "num_turns": 0,
+            "tools": state["tools"],
         }
 
     return {
@@ -257,4 +261,5 @@ def run_claude(
         "cost_usd": state["cost"],
         "duration_ms": state["duration"],
         "num_turns": state["turns"],
+        "tools": state["tools"],
     }

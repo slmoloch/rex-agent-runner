@@ -6,3 +6,4 @@ jobs/
 workspace/
 *.pyc
 .DS_Store
+.claude/
