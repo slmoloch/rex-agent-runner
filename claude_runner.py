@@ -9,6 +9,7 @@ import selectors
 import shutil
 import subprocess
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -44,6 +45,8 @@ CLAUDE_BIN = _find_claude()
 REX_PROMPT_PATH = INSTALL_DIR / "rex_system_prompt.md"
 AGENT_PROMPT_PATH = Path(WORKDIR) / "AGENT.md"
 SKILLS_DIR = Path(WORKDIR) / "skills"
+REX_DIR = Path(WORKDIR) / ".rex"
+TURN_MARKER_DIR = REX_DIR / "turn-markers"
 
 
 def _load_skills_content() -> str:
@@ -73,6 +76,37 @@ SYSTEM_PROMPT = "\n\n".join(_parts)
 
 DEFAULT_IDLE_TIMEOUT = 600  # seconds of no stream output before we consider Claude stuck
 DEFAULT_MAX_TIMEOUT: int | None = None  # no absolute wall-clock cap by default
+
+
+def _drain_turn_markers(turn_id: str) -> list[dict]:
+    """Read and delete the marker file written by `rex user` calls.
+
+    Each successful `rex user` invocation appends one JSON line to
+    <workspace>/.rex/turn-markers/<turn_id>.jsonl. We read it, delete it,
+    and return the parsed list of sends so the caller can decide whether
+    to suppress the fallback response and can log what was delivered.
+    """
+    path = TURN_MARKER_DIR / ("%s.jsonl" % turn_id)
+    if not path.exists():
+        return []
+    sends: list[dict] = []
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    sends.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except Exception:
+        logger.exception("failed to read turn marker %s", path)
+    try:
+        path.unlink()
+    except Exception:
+        pass
+    return sends
 
 
 def _parse_event(line: str, state: dict) -> None:
@@ -151,7 +185,9 @@ def run_claude(
 
     logger.info("Prompt: %s", prompt[:200])
 
+    turn_id = uuid.uuid4().hex
     env = os.environ.copy()
+    env["REX_TURN_ID"] = turn_id
     if session_id:
         env["REX_SESSION_ID"] = session_id
 
@@ -236,6 +272,7 @@ def run_claude(
             "session_id": session_id,
             "cost_usd": 0, "duration_ms": 0, "num_turns": 0,
             "tools": state["tools"],
+            "rex_user_sends": _drain_turn_markers(turn_id),
         }
 
     returncode = proc.wait()
@@ -243,6 +280,8 @@ def run_claude(
     # Drain any trailing partial line
     if stdout_buf.strip():
         _parse_event(stdout_buf.decode("utf-8", errors="replace"), state)
+
+    rex_user_sends = _drain_turn_markers(turn_id)
 
     if returncode != 0:
         stderr = b"".join(stderr_chunks).decode("utf-8", errors="replace").strip()
@@ -253,6 +292,7 @@ def run_claude(
             "session_id": session_id,
             "cost_usd": 0, "duration_ms": 0, "num_turns": 0,
             "tools": state["tools"],
+            "rex_user_sends": rex_user_sends,
         }
 
     return {
@@ -262,4 +302,5 @@ def run_claude(
         "duration_ms": state["duration"],
         "num_turns": state["turns"],
         "tools": state["tools"],
+        "rex_user_sends": rex_user_sends,
     }

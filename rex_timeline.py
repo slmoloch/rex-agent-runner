@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS events (
     duration_ms INTEGER,
     num_turns INTEGER,
     caller_session TEXT,
-    tools TEXT
+    tools TEXT,
+    rex_user_sends TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_sid ON events(session_id);
@@ -41,18 +42,20 @@ _COLUMNS = (
     "timestamp", "session", "session_id", "trigger",
     "prompt_preview", "response_preview",
     "cost_usd", "duration_ms", "num_turns", "caller_session",
-    "tools",
+    "tools", "rex_user_sends",
 )
+
+_JSON_COLUMNS = {"tools", "rex_user_sends"}
 
 
 def _encode_col(col: str, value):
-    if col == "tools" and value is not None and not isinstance(value, str):
+    if col in _JSON_COLUMNS and value is not None and not isinstance(value, str):
         return json.dumps(value)
     return value
 
 
 def _decode_col(col: str, value):
-    if col == "tools" and isinstance(value, str):
+    if col in _JSON_COLUMNS and isinstance(value, str):
         try:
             return json.loads(value)
         except json.JSONDecodeError:
@@ -74,6 +77,8 @@ def init_db() -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(events)").fetchall()}
     if "tools" not in existing:
         conn.execute("ALTER TABLE events ADD COLUMN tools TEXT")
+    if "rex_user_sends" not in existing:
+        conn.execute("ALTER TABLE events ADD COLUMN rex_user_sends TEXT")
     conn.commit()
     conn.close()
 

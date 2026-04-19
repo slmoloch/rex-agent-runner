@@ -267,6 +267,37 @@
     word-break: break-all;
   }
   .tool-empty { color: #484f58; font-size: 12px; font-style: italic; }
+  .tool-row.rex-user-tool {
+    background: #0a2818;
+    border-color: #2ea043;
+    position: relative;
+  }
+  .tool-row.rex-user-tool .tool-name { color: #56d364; }
+  .tool-row.rex-user-tool .rex-user-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    color: #0a2818;
+    background: #56d364;
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    vertical-align: middle;
+  }
+  .tt-rex-user {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    color: #0a2818;
+    background: #56d364;
+    padding: 1px 5px;
+    border-radius: 6px;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
   .sid-mono {
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-size: 11px;
@@ -285,6 +316,7 @@
     <div class="legend-item"><div class="legend-swatch" style="background:#bc8cff"></div>dispatch</div>
     <div class="legend-item"><div class="legend-swatch" style="background:#f85149"></div>gc</div>
     <div class="legend-item"><div class="legend-swatch" style="background:#58a6ff"></div>reset</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#56d364;border-radius:50%"></div>&rarr; rex user</div>
   </div>
 </header>
 
@@ -347,6 +379,12 @@
     if (trigger.startsWith('callback')) return COLORS.callback;
     if (trigger.startsWith('send')) return COLORS.send;
     return DEFAULT_COLOR;
+  }
+
+  var REX_USER_COLOR = '#56d364';
+
+  function hasRexUser(ev) {
+    return !!(ev && ev.rex_user_sends && ev.rex_user_sends.length);
   }
 
   // --- state ---
@@ -470,6 +508,9 @@
       .attr('width', function (d) { return Math.max(MIN_EVENT_W, nx(d.t1) - nx(d.t0)); });
 
     svg.selectAll('.ev-dot')
+      .attr('cx', function (d) { return nx(d.t0); });
+
+    svg.selectAll('.rex-user-marker')
       .attr('cx', function (d) { return nx(d.t0); });
 
     svg.selectAll('.conn-path')
@@ -597,6 +638,7 @@
       s.events.forEach(function (d) {
         var color = tColor(d.ev.trigger);
         var hasDur = d.ev.duration_ms > 0;
+        var rexUser = hasRexUser(d.ev);
         if (hasDur) {
           evG.append('rect')
             .datum(d)
@@ -604,8 +646,9 @@
             .attr('x', xScale(d.t0)).attr('y', blockY + 3)
             .attr('width', Math.max(MIN_EVENT_W, xScale(d.t1) - xScale(d.t0)))
             .attr('height', BLOCK_H - 6).attr('rx', 3)
-            .attr('fill', color).attr('fill-opacity', 0.65)
-            .attr('stroke', color).attr('stroke-width', 1)
+            .attr('fill', color).attr('fill-opacity', rexUser ? 0.5 : 0.65)
+            .attr('stroke', rexUser ? REX_USER_COLOR : color)
+            .attr('stroke-width', rexUser ? 1.75 : 1)
             .style('cursor', 'pointer')
             .on('mouseover', function (event) { showTip(event, d.ev); })
             .on('mousemove', moveTip)
@@ -617,12 +660,25 @@
             .attr('class', 'ev-dot')
             .attr('cx', xScale(d.t0)).attr('cy', laneY + LANE_H / 2)
             .attr('r', 5).attr('fill', color)
-            .attr('stroke', '#0d1117').attr('stroke-width', 1.5)
+            .attr('stroke', rexUser ? REX_USER_COLOR : '#0d1117')
+            .attr('stroke-width', rexUser ? 2 : 1.5)
             .style('cursor', 'pointer')
             .on('mouseover', function (event) { showTip(event, d.ev); })
             .on('mousemove', moveTip)
             .on('mouseout', hideTip)
             .on('click', function (event) { event.stopPropagation(); hideTip(); openModal(d.ev); });
+        }
+        if (rexUser) {
+          evG.append('circle')
+            .datum(d)
+            .attr('class', 'rex-user-marker')
+            .attr('cx', xScale(d.t0))
+            .attr('cy', blockY - 2)
+            .attr('r', 4)
+            .attr('fill', REX_USER_COLOR)
+            .attr('stroke', '#0d1117')
+            .attr('stroke-width', 1.25)
+            .style('pointer-events', 'none');
         }
       });
     });
@@ -663,8 +719,9 @@
     var t = new Date(ev.timestamp);
     var dur = ev.duration_ms ? fmtDur(ev.duration_ms) : '-';
     var cost = ev.cost_usd != null ? '$' + ev.cost_usd.toFixed(4) : '-';
+    var rexTag = hasRexUser(ev) ? ' <span class="tt-rex-user">&rarr; user (' + ev.rex_user_sends.length + ')</span>' : '';
     el.innerHTML =
-      '<div class="tt-row"><strong>' + esc(ev.trigger || '?') + '</strong> &rarr; ' + esc(ev.session || '') + '</div>' +
+      '<div class="tt-row"><strong>' + esc(ev.trigger || '?') + '</strong> &rarr; ' + esc(ev.session || '') + rexTag + '</div>' +
       '<div class="tt-row tt-dim">' + t.toLocaleString() + '</div>' +
       '<div class="tt-row tt-dim">' + dur + ' &middot; ' + cost + ' &middot; ' + (ev.num_turns || 0) + ' turns</div>' +
       (ev.prompt_preview ? '<div class="tt-prompt">' + esc(ev.prompt_preview) + '</div>' : '');
@@ -711,6 +768,12 @@
         '<div class="sid-mono">' + esc(ev.session_id) + '</div></div>';
     }
 
+    if (hasRexUser(ev)) {
+      html += '<div class="modal-section">' +
+        '<div class="modal-label">Sent to user (' + ev.rex_user_sends.length + ')</div>' +
+        renderRexUserSends(ev.rex_user_sends) + '</div>';
+    }
+
     html += '<div class="modal-section">' +
       '<div class="modal-label">Tools used (' + (ev.tools ? ev.tools.length : 0) + ')</div>' +
       renderTools(ev.tools) + '</div>';
@@ -746,6 +809,26 @@
         out += '<div class="tool-input">' + esc(input) + '</div>';
       }
       out += '</div>';
+    });
+    out += '</div>';
+    return out;
+  }
+
+  function renderRexUserSends(sends) {
+    var out = '<div class="tool-list">';
+    sends.forEach(function (s) {
+      var body = '';
+      if (s.mode === 'file') {
+        body = (s.path || '') + (s.caption ? '\n' + s.caption : '');
+      } else {
+        body = s.message || '';
+      }
+      out += '<div class="tool-row rex-user-tool">' +
+        '<div class="tool-name">&rarr; user' +
+          '<span class="rex-user-tag">' + esc(s.mode || '?') + '</span>' +
+        '</div>' +
+        (body ? '<div class="tool-input">' + esc(body) + '</div>' : '') +
+        '</div>';
     });
     out += '</div>';
     return out;

@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 import logging.handlers
 import os
+import time
 from pathlib import Path
 from aiohttp import web
 from telegram import Update
@@ -19,7 +20,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from claude_runner import CONFIG, WORKDIR, INSTALL_DIR, run_claude
+from claude_runner import CONFIG, WORKDIR, INSTALL_DIR, TURN_MARKER_DIR, run_claude
 from rex_session import (
     MAIN_SESSION,
     get_main_session_id,
@@ -75,12 +76,32 @@ def is_authorized(update):
     return True
 
 
+STALE_MARKER_AGE_SECONDS = 24 * 3600
+
+
+def _cleanup_stale_turn_markers():
+    """Delete orphan turn-marker files from previous runs or crashed turns."""
+    if not TURN_MARKER_DIR.is_dir():
+        return
+    cutoff = time.time() - STALE_MARKER_AGE_SECONDS
+    for path in TURN_MARKER_DIR.glob("*.jsonl"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+        except OSError:
+            pass
+
+
 def _run_in_session(prompt, session_target, trigger, timeout=None, caller_session=None):
     """Run a Claude prompt in the given session target and log the event.
 
     session_target: "main" (persistent), "new" (ephemeral), or a raw session ID.
     trigger: source of the prompt (e.g. "telegram", "callback:name", "dispatch").
     caller_session: session ID of the caller (for dispatch tracking).
+
+    Returns: (response_text, used_rex_user). `used_rex_user` is True when the
+    turn already delivered its reply through `rex user`, in which case callers
+    should suppress the fallback response text.
     """
     session_id = resolve_session_id(session_target)
 
@@ -107,6 +128,8 @@ def _run_in_session(prompt, session_target, trigger, timeout=None, caller_sessio
         name = session_target if session_target == MAIN_SESSION else None
         register_session(new_session_id, name=name)
 
+    rex_user_sends = result.get("rex_user_sends", []) or []
+
     event = {
         "session": session_target,
         "session_id": new_session_id,
@@ -118,11 +141,20 @@ def _run_in_session(prompt, session_target, trigger, timeout=None, caller_sessio
         "num_turns": result["num_turns"],
         "tools": result.get("tools", []),
     }
+    if rex_user_sends:
+        event["rex_user_sends"] = rex_user_sends
     if caller_session:
         event["caller_session"] = caller_session
     append_event(event)
 
-    return result["response"]
+    if rex_user_sends:
+        logger.info(
+            "rex user delivered %d message(s): %s",
+            len(rex_user_sends),
+            ", ".join(s.get("mode", "?") for s in rex_user_sends),
+        )
+
+    return result["response"], bool(rex_user_sends)
 
 
 async def start(update, context):
@@ -183,9 +215,10 @@ async def handle_message(update, context):
     # Telegram's typing indicator expires after ~5s; re-send it every 4s
     # until the Claude run finishes.
     typing_task = asyncio.create_task(_keep_typing(chat))
+    used_rex_user = False
     try:
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
+        response, used_rex_user = await loop.run_in_executor(
             None, lambda: _run_in_session(
                 update.message.text, MAIN_SESSION, trigger="telegram"
             )
@@ -196,7 +229,12 @@ async def handle_message(update, context):
     finally:
         typing_task.cancel()
 
-    await _send_response(update.message, response)
+    if used_rex_user:
+        # The agent already delivered the reply via `rex user` — the final
+        # turn text is just a fallback and shouldn't be sent as a duplicate.
+        return
+    if response:
+        await _send_response(update.message, response)
 
 
 async def _send_response(message, response):
@@ -286,7 +324,7 @@ async def handle_voice(update, context):
             prompt_lines.append("Caption: %s" % caption)
         prompt = "\n".join(prompt_lines)
 
-        response = await loop.run_in_executor(
+        response, used_rex_user = await loop.run_in_executor(
             None, lambda: _run_in_session(
                 prompt, MAIN_SESSION, trigger="telegram-voice", timeout=300
             )
@@ -297,6 +335,12 @@ async def handle_voice(update, context):
         return
     finally:
         typing_task.cancel()
+
+    if used_rex_user:
+        # The agent already replied via `rex user` — don't synthesize a duplicate.
+        return
+    if not response:
+        return
 
     reply_path = INBOX_DIR / ("%s-reply-%s.ogg" % (timestamp, voice.file_unique_id))
     try:
@@ -356,9 +400,10 @@ async def handle_file(update, context):
     prompt = "\n".join(prompt_lines)
 
     typing_task = asyncio.create_task(_keep_typing(chat))
+    used_rex_user = False
     try:
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
+        response, used_rex_user = await loop.run_in_executor(
             None, lambda: _run_in_session(
                 prompt, MAIN_SESSION, trigger="telegram-file"
             )
@@ -369,7 +414,10 @@ async def handle_file(update, context):
     finally:
         typing_task.cancel()
 
-    await _send_response(message, response)
+    if used_rex_user:
+        return
+    if response:
+        await _send_response(message, response)
 
 
 async def _keep_typing(chat):
@@ -406,7 +454,7 @@ async def handle_job_request(request):
     logger.info("Job received: %s (session: %s)", job_name, session_target)
 
     loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(
+    response, _ = await loop.run_in_executor(
         None, lambda: _run_in_session(
             prompt, session_target, trigger=job_name,
             caller_session=caller_session,
@@ -553,6 +601,7 @@ async def error_handler(update, context):
 
 async def post_init(application):
     init_db()
+    _cleanup_stale_turn_markers()
     await run_http_server()
     asyncio.create_task(run_gc_loop())
     asyncio.create_task(run_daily_reset_loop())
