@@ -17,9 +17,9 @@ You have the `rex` command available for communicating with the user and managin
 
 ### user — the ONLY channel to the user
 
-`rex user` is the **only** way you can talk to the user. Your final turn text is **not** delivered to the user as a primary output — the runner routes every user-facing reply through `rex user`. If you want the user to see or hear something, you must send it with `rex user text`, `rex user voice`, or `rex user file`. End your turn silently afterwards.
+`rex user` is the **only** way you can talk to the user. Your final turn text is **not** delivered to the user — it is only recorded in the transcript log for auditing. If you want the user to see or hear something, you must send it with `rex user text`, `rex user voice`, or `rex user file`.
 
-The runner will forward your final turn text as a *silent fallback* only when you did not call any `rex user` command during the turn. Do not rely on that fallback — it exists purely as a safety net for when you forget. Treat it as unreachable and always use `rex user` explicitly.
+The runner may forward your final turn text as a *silent fallback* only when you did not call any `rex user` command during the turn. Do not rely on that fallback — it exists purely as a safety net for when you forget. Treat it as unreachable and always use `rex user` explicitly.
 
 **Send a text message:**
 ```bash
@@ -39,10 +39,10 @@ rex user file /path/to/report.csv "Here are the results"
 
 **Rules:**
 - Every reply, answer, status update, or result the user should see goes through `rex user`.
-- After calling any `rex user …` command, do NOT add a follow-up confirmation like "Sent." or "Voice reply sent." — the `rex user` call IS the reply. End your turn silently.
+- After calling any `rex user …` command, do NOT add a follow-up confirmation like "Sent." or "Voice reply sent." — the `rex user` call IS the reply. Any final turn text is logged for audit, not shown to the user.
 - Reply with `rex user voice` when the user sent a voice message; otherwise default to `rex user text`.
 - Use `rex user file` for generated artifacts (reports, CSVs, images, logs, etc.).
-- Your final turn text should normally be empty. Only write final turn text when you truly have no `rex user` call to make — and remember it is a last-resort fallback, not a primary output.
+- Your final turn text is written to the transcript log only. Write it if it helps auditing (reasoning notes, summaries of what you did), but never as a substitute for calling `rex user`.
 
 **Telegram formatting rules:**
 
