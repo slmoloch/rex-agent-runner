@@ -14,6 +14,16 @@ fi
 echo "==> Installing dependencies..."
 "$PROJECT_DIR/venv/bin/pip" install -q -r "$PROJECT_DIR/requirements.txt"
 
+# Build the Go port alongside the Python install. The shell wrapper still
+# dispatches to Python for every subcommand; the Go binary only exposes what
+# has been ported so far (see PORT_CLEANUP.md for the transition plan).
+if command -v go >/dev/null 2>&1; then
+    echo "==> Building Go binary..."
+    (cd "$PROJECT_DIR/go" && go build -o "$BIN_DIR/rex-go" ./cmd/rex)
+else
+    echo "==> Skipping Go build (go not found on PATH)."
+fi
+
 echo "==> Making rex executable..."
 chmod +x "$BIN_DIR/rex"
 
