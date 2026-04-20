@@ -104,7 +104,8 @@
 
   #chart-wrap {
     flex: 1;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     position: relative;
   }
 
@@ -481,10 +482,15 @@
 
     xAxisG = svg.append('g').attr('class', 'g-axis').attr('transform', 'translate(0,' + AXIS_H + ')');
 
-    zoomBehavior = d3.zoom().scaleExtent([0.05, 200]).on('zoom', function (ev) {
-      curTransform = ev.transform;
-      applyZoom();
-    });
+    zoomBehavior = d3.zoom().scaleExtent([0.05, 200])
+      .filter(function (event) {
+        if (event.type === 'wheel') return event.ctrlKey || event.metaKey;
+        return !event.button;
+      })
+      .on('zoom', function (ev) {
+        curTransform = ev.transform;
+        applyZoom();
+      });
     svg.call(zoomBehavior);
   }
 
