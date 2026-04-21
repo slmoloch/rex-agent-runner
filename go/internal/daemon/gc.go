@@ -72,12 +72,12 @@ func (d *Daemon) gcOnce() []string {
 }
 
 func (d *Daemon) dispatchedToActive(sessionID string) bool {
-	evs, err := d.events.Load(1)
+	rows, err := d.timeline.Query(1, "")
 	if err != nil {
 		return false
 	}
 	tracked := d.sessions.Tracked()
-	for _, e := range evs {
+	for _, e := range rows {
 		if e.CallerSession != sessionID {
 			continue
 		}

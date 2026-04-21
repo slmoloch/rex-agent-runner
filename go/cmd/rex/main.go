@@ -25,6 +25,7 @@ import (
 	"github.com/slmoloch/rex-agent-runner/internal/initflow"
 	"github.com/slmoloch/rex-agent-runner/internal/session"
 	"github.com/slmoloch/rex-agent-runner/internal/skills"
+	"github.com/slmoloch/rex-agent-runner/internal/timeline"
 	"github.com/slmoloch/rex-agent-runner/internal/usercmd"
 	"github.com/slmoloch/rex-agent-runner/internal/workspace"
 )
@@ -280,10 +281,15 @@ func runTimeline(args []string) error {
 		return err
 	}
 	ws := workspace.New(mustWorkspaceDir(cfg))
-	store := events.NewStore(ws.EventsDir, ws.LegacyEvents)
+	tl, err := timeline.Open(filepath.Join(ws.Root, "events.db"))
+	if err != nil {
+		return fmt.Errorf("open timeline db: %w", err)
+	}
+	defer tl.Close()
+
 	switch args[0] {
 	case "stats":
-		st, err := store.Stats()
+		st, err := tl.Stats()
 		if err != nil {
 			return err
 		}
@@ -293,10 +299,22 @@ func runTimeline(args []string) error {
 		fmt.Printf("Cost:     $%.4f\n", st.Cost)
 		return nil
 	case "rebuild":
-		fmt.Println("Timeline is backed by JSONL files directly — rebuild is a no-op.")
+		paths := events.JSONLFiles(ws.EventsDir, ws.LegacyEvents)
+		if len(paths) == 0 {
+			fmt.Println("No JSONL files to rebuild from.")
+			return nil
+		}
+		n, err := tl.Rebuild(paths)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Rebuilt %d events into %s\n", n, filepath.Join(ws.Root, "events.db"))
 		return nil
 	case "clear":
-		fmt.Println("To clear events, delete <workspace>/events/*.jsonl manually.")
+		if err := tl.Clear(); err != nil {
+			return err
+		}
+		fmt.Printf("Cleared events table. JSONL audit log under %s is untouched.\n", ws.EventsDir)
 		return nil
 	}
 	return fmt.Errorf("unknown timeline command: %s", args[0])
@@ -308,8 +326,6 @@ func runSession(ctx context.Context, args []string) error {
 		return err
 	}
 	ws := workspace.New(mustWorkspaceDir(cfg))
-	evStore := events.NewStore(ws.EventsDir, ws.LegacyEvents)
-	seStore := session.NewStore(ws.SessionsFile, evStore)
 
 	if len(args) == 0 {
 		fmt.Println("Usage: rex session <reset|list|gc>")
@@ -317,6 +333,14 @@ func runSession(ctx context.Context, args []string) error {
 	}
 	switch args[0] {
 	case "reset":
+		tl, err := timeline.Open(filepath.Join(ws.Root, "events.db"))
+		if err != nil {
+			return fmt.Errorf("open timeline db: %w", err)
+		}
+		defer tl.Close()
+		evStore := events.NewStore(ws.EventsDir, ws.LegacyEvents, tl)
+		seStore := session.NewStore(ws.SessionsFile, evStore)
+
 		mainID := seStore.GetMainID()
 		if mainID != "" {
 			fmt.Println("Preparing session for reset…")
@@ -334,6 +358,7 @@ func runSession(ctx context.Context, args []string) error {
 		fmt.Println("Main session reset. Will start fresh on next message.")
 		return nil
 	case "list":
+		seStore := session.NewStore(ws.SessionsFile, events.NewStore(ws.EventsDir, ws.LegacyEvents, nil))
 		tracked := seStore.Tracked()
 		mainID := seStore.GetMainID()
 		if len(tracked) == 0 {

@@ -12,21 +12,23 @@ import (
 	"net/http"
 
 	"github.com/slmoloch/rex-agent-runner/internal/assets"
-	"github.com/slmoloch/rex-agent-runner/internal/events"
 	"github.com/slmoloch/rex-agent-runner/internal/session"
+	"github.com/slmoloch/rex-agent-runner/internal/timeline"
 )
 
 // JobFunc processes one /job request and returns the response text.
 type JobFunc func(ctx context.Context, prompt, jobName, sessionTarget, callerSession string) (string, error)
 
 type Server struct {
-	events  *events.Store
-	session *session.Store
-	job     JobFunc
+	timeline *timeline.Store
+	session  *session.Store
+	job      JobFunc
 }
 
-func New(ev *events.Store, se *session.Store, job JobFunc) *Server {
-	return &Server{events: ev, session: se, job: job}
+// New wires the dashboard and JSON APIs. The timeline store is the read path
+// for /api/events (indexed SQLite queries).
+func New(tl *timeline.Store, se *session.Store, job JobFunc) *Server {
+	return &Server{timeline: tl, session: se, job: job}
 }
 
 // Routes returns an http.Handler mounting every rex endpoint.
@@ -58,12 +60,12 @@ func (s *Server) Routes() http.Handler {
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	since := r.URL.Query().Get("since")
-	events, err := s.events.LoadSince(since)
+	rows, err := s.timeline.Query(7, since)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, events)
+	writeJSON(w, rows)
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {

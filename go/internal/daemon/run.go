@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/slmoloch/rex-agent-runner/internal/assets"
@@ -19,6 +20,7 @@ import (
 	"github.com/slmoloch/rex-agent-runner/internal/session"
 	"github.com/slmoloch/rex-agent-runner/internal/skills"
 	"github.com/slmoloch/rex-agent-runner/internal/telegram"
+	"github.com/slmoloch/rex-agent-runner/internal/timeline"
 	"github.com/slmoloch/rex-agent-runner/internal/voice"
 	"github.com/slmoloch/rex-agent-runner/internal/workspace"
 )
@@ -28,6 +30,7 @@ type Daemon struct {
 	ws        workspace.Paths
 	runner    *claude.Runner
 	events    *events.Store
+	timeline  *timeline.Store
 	sessions  *session.Store
 	callbacks *callback.Store
 	tg        *telegram.Client
@@ -54,7 +57,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	evStore := events.NewStore(ws.EventsDir, ws.LegacyEvents)
+	tlStore, err := timeline.Open(filepath.Join(ws.Root, "events.db"))
+	if err != nil {
+		return fmt.Errorf("open timeline db: %w", err)
+	}
+	evStore := events.NewStore(ws.EventsDir, ws.LegacyEvents, tlStore)
 	seStore := session.NewStore(ws.SessionsFile, evStore)
 	cbStore := callback.NewStore(ws.CallbacksFile)
 
@@ -90,6 +97,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		ws:           ws,
 		runner:       &claude.Runner{Bin: claude.FindBin(cfg.ClaudeBin), Workdir: ws.Root, TurnMarkerDir: ws.TurnMarkerDir},
 		events:       evStore,
+		timeline:     tlStore,
 		sessions:     seStore,
 		callbacks:    cbStore,
 		tg:           tg,
@@ -101,15 +109,17 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	d.cleanupStaleTurnMarkers()
 
-	srv, err := server.Listen(port, server.New(evStore, seStore, d.RunJob).Routes())
+	srv, err := server.Listen(port, server.New(tlStore, seStore, d.RunJob).Routes())
 	if err != nil {
 		return err
 	}
 	defer shutdown(srv)
+	defer tlStore.Close()
 
 	go callback.Run(ctx, cbStore, ws.Root, d.callbackSubmitter())
 	go d.gcLoop(ctx)
 	go d.dailyResetLoop(ctx)
+	go d.retentionLoop(ctx)
 
 	slog.Info("rex daemon started", "dashboard", fmt.Sprintf("http://127.0.0.1:%d/", port))
 	return d.pollTelegram(ctx)

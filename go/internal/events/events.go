@@ -1,20 +1,25 @@
-// Package events persists agent-turn events to hourly-rotated JSONL files.
-// This is the source of truth for the timeline — there is no SQLite mirror.
+// Package events is the append path for agent-turn events. Each event goes
+// to both an hourly-rotated JSONL file (the audit log, retention-eligible)
+// and — when configured — the timeline SQLite database (permanent, queryable).
+//
+// The JSONL files are authoritative for rebuilding the SQLite DB after loss
+// or corruption (see timeline.Store.Rebuild).
 package events
 
 import (
-	"bufio"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/slmoloch/rex-agent-runner/internal/timeline"
 )
 
-// Event mirrors the on-disk schema. Extra fields round-trip via Extra so
-// readers that don't know about newer fields still preserve them.
+// Event mirrors the on-disk JSONL shape.
 type Event struct {
 	Timestamp       string  `json:"timestamp"`
 	Session         string  `json:"session,omitempty"`
@@ -31,13 +36,16 @@ type Event struct {
 }
 
 type Store struct {
-	dir    string // hourly files live here
-	legacy string // pre-rotation events.jsonl
-	mu     sync.Mutex
+	dir      string
+	legacy   string
+	timeline *timeline.Store // optional; nil means "JSONL only"
+	mu       sync.Mutex
 }
 
-func NewStore(eventsDir, legacyFile string) *Store {
-	return &Store{dir: eventsDir, legacy: legacyFile}
+// NewStore creates a writer backed by hourly JSONL files. Passing a non-nil
+// timeline enables the SQLite mirror.
+func NewStore(eventsDir, legacyFile string, tl *timeline.Store) *Store {
+	return &Store{dir: eventsDir, legacy: legacyFile, timeline: tl}
 }
 
 // Append writes one event. Timestamp is filled if missing.
@@ -60,129 +68,92 @@ func (s *Store) Append(e Event) error {
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(append(data, '\n'))
-	return err
-}
-
-// Load returns events from the last `days` days, newest first.
-func (s *Store) Load(days int) ([]Event, error) {
-	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
-	return s.loadSince(cutoff)
-}
-
-// LoadSince returns events strictly newer than the given RFC3339 timestamp.
-// An empty string falls back to a 7-day window.
-func (s *Store) LoadSince(since string) ([]Event, error) {
-	if since == "" {
-		return s.Load(7)
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		return err
 	}
-	t, err := time.Parse(time.RFC3339Nano, since)
-	if err != nil {
-		t, err = time.Parse(time.RFC3339, since)
-		if err != nil {
-			return nil, err
+
+	// Mirror into SQLite. Failure here is non-fatal — JSONL is authoritative
+	// and the DB can be rebuilt from it.
+	if s.timeline != nil {
+		if err := s.timeline.Insert(timelineRow(e)); err != nil {
+			slog.Warn("timeline insert failed (jsonl still authoritative)", "err", err)
 		}
 	}
-	// "strictly newer" mirrors the Python > semantics.
-	return s.loadSince(t.Add(time.Nanosecond))
+	return nil
 }
 
-func (s *Store) loadSince(cutoff time.Time) ([]Event, error) {
-	cutoffHour := cutoff.Truncate(time.Hour)
-	var events []Event
+func timelineRow(e Event) timeline.Row {
+	return timeline.Row{
+		Timestamp:       e.Timestamp,
+		Session:         e.Session,
+		SessionID:       e.SessionID,
+		Trigger:         e.Trigger,
+		PromptPreview:   e.PromptPreview,
+		ResponsePreview: e.ResponsePreview,
+		CostUSD:         e.CostUSD,
+		DurationMS:      e.DurationMS,
+		NumTurns:        e.NumTurns,
+		CallerSession:   e.CallerSession,
+		Tools:           e.Tools,
+		RexUserSends:    e.RexUserSends,
+	}
+}
 
-	// Hourly-bucketed files.
-	entries, err := os.ReadDir(s.dir)
-	if err == nil {
-		// Skip files whose filename-encoded hour is older than cutoffHour.
+// JSONLFiles returns every JSONL path that contributes to the audit log,
+// sorted by filename (which is equivalent to chronological for hourly
+// rotation). Used by `rex timeline rebuild`.
+func JSONLFiles(eventsDir, legacyFile string) []string {
+	var out []string
+	if entries, err := os.ReadDir(eventsDir); err == nil {
+		names := make([]string, 0, len(entries))
 		for _, e := range entries {
-			name := e.Name()
-			if !strings.HasPrefix(name, "events_") || !strings.HasSuffix(name, ".jsonl") {
+			if e.IsDir() {
 				continue
 			}
-			stem := strings.TrimSuffix(strings.TrimPrefix(name, "events_"), ".jsonl")
-			if fh, err := time.ParseInLocation("2006-01-02_15", stem, time.Local); err == nil {
-				if fh.Before(cutoffHour) {
-					continue
-				}
-			}
-			more, err := readFile(filepath.Join(s.dir, name), cutoff)
-			if err == nil {
-				events = append(events, more...)
+			n := e.Name()
+			if strings.HasPrefix(n, "events_") && strings.HasSuffix(n, ".jsonl") {
+				names = append(names, n)
 			}
 		}
+		sort.Strings(names)
+		for _, n := range names {
+			out = append(out, filepath.Join(eventsDir, n))
+		}
 	}
-	// Legacy pre-rotation file.
-	if legacy, err := readFile(s.legacy, cutoff); err == nil {
-		events = append(events, legacy...)
+	if _, err := os.Stat(legacyFile); err == nil {
+		out = append(out, legacyFile)
 	}
-	sort.Slice(events, func(i, j int) bool { return events[i].Timestamp > events[j].Timestamp })
-	return events, nil
+	return out
 }
 
-func readFile(path string, cutoff time.Time) ([]Event, error) {
-	f, err := os.Open(path)
+// CleanupOlderThan removes hourly JSONL files whose hour-of-name is older
+// than age. SQLite is untouched. Returns the deleted paths.
+func CleanupOlderThan(eventsDir string, age time.Duration) []string {
+	entries, err := os.ReadDir(eventsDir)
 	if err != nil {
-		return nil, err
+		return nil
 	}
-	defer f.Close()
-	var out []Event
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if len(line) == 0 {
+	cutoff := time.Now().Add(-age).Truncate(time.Hour)
+	var deleted []string
+	for _, e := range entries {
+		if e.IsDir() {
 			continue
 		}
-		var e Event
-		if err := json.Unmarshal(line, &e); err != nil {
+		n := e.Name()
+		if !strings.HasPrefix(n, "events_") || !strings.HasSuffix(n, ".jsonl") {
 			continue
 		}
-		if e.Timestamp != "" {
-			t, err := time.Parse(time.RFC3339Nano, e.Timestamp)
-			if err != nil {
-				t, err = time.Parse(time.RFC3339, e.Timestamp)
+		stem := strings.TrimSuffix(strings.TrimPrefix(n, "events_"), ".jsonl")
+		t, err := time.ParseInLocation("2006-01-02_15", stem, time.Local)
+		if err != nil {
+			continue
+		}
+		if t.Before(cutoff) {
+			p := filepath.Join(eventsDir, n)
+			if err := os.Remove(p); err == nil {
+				deleted = append(deleted, p)
 			}
-			// If parsing succeeded and the event is older than cutoff, skip.
-			// Mirror Python: unparseable timestamps are kept, not dropped.
-			if err == nil && t.Before(cutoff) {
-				continue
-			}
-		}
-		out = append(out, e)
-	}
-	return out, nil
-}
-
-// Stats summarises everything on disk. Used by `rex timeline stats`.
-type Stats struct {
-	Total        int
-	Sessions     int
-	Cost         float64
-	Oldest       string
-	Newest       string
-}
-
-func (s *Store) Stats() (Stats, error) {
-	all, err := s.loadSince(time.Time{}) // all-time
-	if err != nil {
-		return Stats{}, err
-	}
-	seen := make(map[string]struct{})
-	var stats Stats
-	for _, e := range all {
-		stats.Total++
-		stats.Cost += e.CostUSD
-		if e.SessionID != "" {
-			seen[e.SessionID] = struct{}{}
-		}
-		if stats.Oldest == "" || e.Timestamp < stats.Oldest {
-			stats.Oldest = e.Timestamp
-		}
-		if e.Timestamp > stats.Newest {
-			stats.Newest = e.Timestamp
 		}
 	}
-	stats.Sessions = len(seen)
-	return stats, nil
+	return deleted
 }

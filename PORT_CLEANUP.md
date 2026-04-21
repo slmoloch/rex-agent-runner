@@ -5,25 +5,39 @@ playbook for retiring the Python implementation.
 
 ## 1. What changed vs. the Python version
 
-Three deliberate simplifications made the Go port cleaner and native on Linux:
+Two deliberate simplifications made the Go port cleaner and native on Linux:
 
 - **No launchd plists for callbacks.** `rex_callback.py` wrote one launchd
   plist per callback so they'd fire even when the daemon was down. The Go
   port runs a scheduler goroutine inside the daemon — callbacks only fire
   while the daemon is running. In return, callbacks are now cross-platform
   (macOS and Linux) with a single code path.
-- **No SQLite timeline.** `rex_timeline.py` mirrored events into `events.db`.
-  The Go port reads the hourly JSONL files (which were already the source of
-  truth) directly. `rex timeline stats` now walks the JSONL; `rebuild` is a
-  no-op; `clear` prints the `rm` to run yourself.
-- **No external Go dependencies.** No `python-telegram-bot` equivalent, no
-  `openai` SDK, no `aiohttp`. The Telegram bot, HTTP dashboard, and OpenAI
-  STT/TTS are all implemented on stdlib `net/http`. `go.mod` has zero require
-  entries.
+- **One external Go dependency.** The only non-stdlib import is
+  `modernc.org/sqlite` (pure-Go SQLite driver, no CGo). The Telegram bot,
+  HTTP dashboard, and OpenAI STT/TTS are still implemented on stdlib
+  `net/http`.
 
 Daemon process management still relies on the OS: `rex start` writes a
 launchd plist on macOS, a systemd user unit on Linux. Both are generated on
 demand — there's no plist in the repo.
+
+### Persistence model
+
+The Python dual-write model is preserved:
+
+- **JSONL audit log** (`workspace/events/events_*.jsonl`) — append-only,
+  human-readable, hourly-rotated. Authoritative for rebuilding the DB after
+  loss.
+- **SQLite timeline** (`workspace/events.db`) — permanent, indexed. The
+  dashboard `/api/events` and `rex timeline stats` hit this; aggregations
+  are O(1) regardless of history size.
+
+The Go daemon writes to JSONL first, then inserts into SQLite. SQLite
+failures are logged but don't fail the append — `rex timeline rebuild`
+regenerates the DB from JSONL whenever needed.
+
+A retention goroutine deletes JSONL files older than **30 days** (see
+`internal/daemon/retention.go:JSONLRetention`). SQLite is never auto-pruned.
 
 ## 2. Port completion checklist
 
@@ -34,7 +48,8 @@ All modules ported:
 - [x] `internal/voice` — OpenAI STT/TTS (stdlib `net/http`)
 - [x] `internal/workspace` — shared workspace path layout
 - [x] `internal/skills` — SKILL.md loader
-- [x] `internal/events` — JSONL append + queries
+- [x] `internal/events` — JSONL append, dual-write to SQLite
+- [x] `internal/timeline` — SQLite timeline store (modernc.org/sqlite)
 - [x] `internal/session` — session store + running/tracked registries
 - [x] `internal/cron` — five-field parser compatible with `rex_callback.py`
 - [x] `internal/callback` — store + in-daemon scheduler
@@ -114,8 +129,10 @@ The workspace state directory (`workspace/`, `workspace/.rex/`,
 `workspace/events/`, `workspace/sessions.json`, `workspace/callbacks.json`)
 stays — the Go implementation reads the same on-disk format.
 
-One-time migration for existing workspaces: if `workspace/events.db` exists
-from the Python era, you can delete it — the Go port never touches it.
+One-time migration for existing workspaces: `workspace/events.db` from the
+Python era uses the same schema, so the Go port opens it in place. If you
+want a clean start, run `rex timeline rebuild` after the upgrade — it
+rebuilds from the JSONL audit log.
 
 ## 6. CI / tooling
 
