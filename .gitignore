@@ -1,9 +1,6 @@
-__pycache__/
-/venv/
+/bin/
 /config.json
 /logs/
-/jobs/
 /workspace/
-*.pyc
 .DS_Store
 .claude/
