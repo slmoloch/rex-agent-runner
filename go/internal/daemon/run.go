@@ -29,6 +29,7 @@ type Daemon struct {
 	cfg       *config.Config
 	ws        workspace.Paths
 	runner    *claude.Runner
+	pool      *claude.Pool
 	events    *events.Store
 	timeline  *timeline.Store
 	sessions  *session.Store
@@ -92,10 +93,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
+	runner := &claude.Runner{Bin: claude.FindBin(cfg.ClaudeBin), Workdir: ws.Root, TurnMarkerDir: ws.TurnMarkerDir}
 	d := &Daemon{
 		cfg:          cfg,
 		ws:           ws,
-		runner:       &claude.Runner{Bin: claude.FindBin(cfg.ClaudeBin), Workdir: ws.Root, TurnMarkerDir: ws.TurnMarkerDir},
+		runner:       runner,
+		pool:         claude.NewPool(runner, claude.DefaultEphemeralWorkers, claude.DefaultQueueCapacity),
 		events:       evStore,
 		timeline:     tlStore,
 		sessions:     seStore,

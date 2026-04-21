@@ -40,35 +40,57 @@ func (d *Daemon) gcOnce() []string {
 	var cleaned []string
 
 	for sid, info := range tracked {
-		if sid == mainID {
-			continue
+		if d.tryCollectSession(sid, info.Name, info.LastActivity, mainID, "gc") {
+			cleaned = append(cleaned, sid)
 		}
-		if d.sessions.IsRunning(sid) {
-			continue
-		}
-		if d.dispatchedToActive(sid) {
-			continue
-		}
-		if d.hasCallbacks(sid, mainID) {
-			continue
-		}
-		slog.Info("gc collecting session",
-			"id", sid, "name", info.Name, "last_activity", info.LastActivity)
-		d.sessions.Unregister(sid)
-		cleaned = append(cleaned, sid)
-		name := info.Name
-		if name == "" {
-			name = sid
-		}
-		_ = d.events.Append(events.Event{
-			Session:         name,
-			SessionID:       sid,
-			Trigger:         "gc",
-			PromptPreview:   "Session garbage collected",
-			ResponsePreview: "last_activity=" + info.LastActivity,
-		})
 	}
 	return cleaned
+}
+
+// gcInstantSession is the eager counterpart to gcOnce: it runs immediately
+// after an ephemeral ("new") turn finishes and unregisters the freshly
+// created session if nothing references it. Running inline keeps "instant"
+// sessions from cluttering sessions.json for up to 30 minutes.
+func (d *Daemon) gcInstantSession(sid string) {
+	tracked := d.sessions.Tracked()
+	info, ok := tracked[sid]
+	if !ok {
+		return
+	}
+	mainID := d.sessions.GetMainID()
+	d.tryCollectSession(sid, info.Name, info.LastActivity, mainID, "gc-instant")
+}
+
+// tryCollectSession applies the shared gc policy to a single session; returns
+// true if it was collected.
+func (d *Daemon) tryCollectSession(sid, name, lastActivity, mainID, trigger string) bool {
+	if sid == "" || sid == mainID {
+		return false
+	}
+	if d.sessions.IsRunning(sid) {
+		return false
+	}
+	if d.dispatchedToActive(sid) {
+		return false
+	}
+	if d.hasCallbacks(sid, mainID) {
+		return false
+	}
+	slog.Info("gc collecting session",
+		"id", sid, "name", name, "last_activity", lastActivity, "trigger", trigger)
+	d.sessions.Unregister(sid)
+	evName := name
+	if evName == "" {
+		evName = sid
+	}
+	_ = d.events.Append(events.Event{
+		Session:         evName,
+		SessionID:       sid,
+		Trigger:         trigger,
+		PromptPreview:   "Session garbage collected",
+		ResponsePreview: "last_activity=" + lastActivity,
+	})
+	return true
 }
 
 func (d *Daemon) dispatchedToActive(sessionID string) bool {

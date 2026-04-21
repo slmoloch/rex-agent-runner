@@ -14,13 +14,22 @@ import (
 // the response text along with a flag telling the caller whether the turn
 // already delivered a reply via `rex user` (so the fallback text reply
 // should be suppressed).
+//
+// Turns are dispatched through the Pool: sessionTarget=="main" routes to the
+// pinned main worker (FIFO, never interleaved), everything else goes onto
+// the shared ephemeral queue (DefaultEphemeralWorkers workers).
 func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigger, callerSession string) (string, bool) {
 	sessionID := d.sessions.Resolve(sessionTarget)
+
+	class := claude.ClassEphemeral
+	if sessionTarget == session.Main {
+		class = claude.ClassMain
+	}
 
 	if sessionID != "" {
 		d.sessions.MarkRunning(sessionID)
 	}
-	result, err := d.runner.Run(ctx, claude.Options{
+	result, err := d.pool.Run(ctx, class, claude.Options{
 		Prompt:       prompt,
 		SessionID:    sessionID,
 		SystemPrompt: d.systemPrompt,
@@ -77,6 +86,14 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 	}
 	if err := d.events.Append(ev); err != nil {
 		slog.Error("events append", "err", err)
+	}
+
+	// "Instant" (sessionTarget=="new") sessions are collected as soon as the
+	// turn ends, unless something still references the fresh session id
+	// (callbacks, an in-flight dispatch chain, …). Longer-lived sessions are
+	// left to the periodic gc loop.
+	if sessionTarget == "new" && newID != "" {
+		d.gcInstantSession(newID)
 	}
 
 	return result.Response, usedRexUser
