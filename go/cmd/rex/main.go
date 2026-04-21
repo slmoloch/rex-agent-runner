@@ -23,7 +23,6 @@ import (
 	"github.com/slmoloch/rex-agent-runner/internal/dispatchcmd"
 	"github.com/slmoloch/rex-agent-runner/internal/events"
 	"github.com/slmoloch/rex-agent-runner/internal/initflow"
-	"github.com/slmoloch/rex-agent-runner/internal/migratecmd"
 	"github.com/slmoloch/rex-agent-runner/internal/session"
 	"github.com/slmoloch/rex-agent-runner/internal/skills"
 	"github.com/slmoloch/rex-agent-runner/internal/timeline"
@@ -70,10 +69,7 @@ Callbacks:
 User channel (called by agents):
   user text <message>
   user voice <message>
-  user file <path> [caption]
-
-Migration:
-  migrate-from-python              One-shot cleanup for Python-era state`
+  user file <path> [caption]`
 
 func main() {
 	if err := run(); err != nil {
@@ -134,8 +130,6 @@ func run() error {
 		}
 		ws := workspace.New(mustWorkspaceDir(cfg))
 		return usercmd.Run(ctx, cfg, ws, args)
-	case "migrate-from-python":
-		return migratecmd.Run(os.Stdout)
 	case "version":
 		fmt.Println("rex (go port) — dev")
 		return nil
