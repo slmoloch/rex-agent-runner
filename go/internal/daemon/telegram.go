@@ -16,6 +16,10 @@ import (
 
 const longPollTimeout = 30
 
+// Sent when a turn ends without a rex user reply or any Claude text — prevents
+// silent drops on timeout / failure / empty-result paths.
+const emptyResponseFallback = "Sorry, I couldn't produce a response. Please try again."
+
 // pollTelegram runs the long-polling loop until ctx is cancelled.
 func (d *Daemon) pollTelegram(ctx context.Context) error {
 	slog.Info("telegram bot started")
@@ -117,7 +121,8 @@ func (d *Daemon) handleText(ctx context.Context, m *telegram.Message) {
 		return
 	}
 	if resp == "" {
-		return
+		slog.Warn("claude produced empty response; sending fallback", "trigger", "telegram")
+		resp = emptyResponseFallback
 	}
 	if err := d.tg.SendMessageChunks(ctx, resp); err != nil {
 		slog.Error("send message failed", "err", err)
@@ -183,6 +188,8 @@ func (d *Daemon) handleVoice(ctx context.Context, m *telegram.Message) {
 		return
 	}
 	if resp == "" {
+		slog.Warn("claude produced empty response; sending fallback", "trigger", "telegram-voice")
+		_ = d.tg.SendMessage(ctx, emptyResponseFallback)
 		return
 	}
 
@@ -281,7 +288,8 @@ func (d *Daemon) handleFile(ctx context.Context, m *telegram.Message, a attached
 		return
 	}
 	if resp == "" {
-		return
+		slog.Warn("claude produced empty response; sending fallback", "trigger", "telegram-file")
+		resp = emptyResponseFallback
 	}
 	if err := d.tg.SendMessageChunks(ctx, resp); err != nil {
 		slog.Error("send message failed", "err", err)
