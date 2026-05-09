@@ -57,8 +57,8 @@ func TestParseLine_ToolInputClippedButStillValidJSON(t *testing.T) {
 	if cmd == longCmd {
 		t.Fatalf("command was not clipped (len=%d)", len(cmd))
 	}
-	if !strings.HasSuffix(cmd, "[clipped]") {
-		t.Fatalf("clipped command should end with [clipped], got: %q", cmd[len(cmd)-20:])
+	if !strings.HasSuffix(cmd, "…") {
+		t.Fatalf("clipped command should end with ellipsis, got: %q", cmd[len(cmd)-20:])
 	}
 	if in["description"] != "ok" {
 		t.Fatalf("short fields should be preserved unchanged, got %v", in["description"])
@@ -121,8 +121,8 @@ func TestParseLine_TextTurnIsClipped(t *testing.T) {
 	if s.turns[0].Text == long {
 		t.Fatalf("text was not clipped")
 	}
-	if !strings.HasSuffix(s.turns[0].Text, "[clipped]") {
-		t.Fatalf("clipped text should end with [clipped]")
+	if !strings.HasSuffix(s.turns[0].Text, "…") {
+		t.Fatalf("clipped text should end with ellipsis")
 	}
 }
 

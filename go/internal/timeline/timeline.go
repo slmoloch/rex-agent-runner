@@ -11,6 +11,7 @@ package timeline
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,6 +20,12 @@ import (
 
 	_ "modernc.org/sqlite" // pure-Go driver; registers as "sqlite"
 )
+
+// ErrStaleSchema is returned by Open when the events table exists but is
+// missing columns this build expects. The user has to run
+// `rex timeline rebuild` to reindex from the JSONL audit log — we never
+// rewrite their on-disk schema in place.
+var ErrStaleSchema = errors.New("timeline: events.db schema is out of date; run `rex timeline rebuild` to reindex")
 
 const schema = `
 CREATE TABLE IF NOT EXISTS events (
@@ -61,8 +68,44 @@ type Store struct {
 	db *sql.DB
 }
 
-// Open creates or opens the SQLite database and applies the schema.
+// Open creates or opens the SQLite database and applies the schema. If the
+// table exists but is missing columns from the current schema (e.g. the
+// `turns` column added when tool-call clipping was reworked), Open returns
+// ErrStaleSchema rather than rewriting the on-disk layout — the user is
+// expected to run `rex timeline rebuild` to reindex.
 func Open(dbPath string) (*Store, error) {
+	db, err := openDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	cols, err := tableColumns(db, "events")
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, ok := cols["turns"]; !ok {
+		db.Close()
+		return nil, ErrStaleSchema
+	}
+	return &Store{db: db}, nil
+}
+
+// openForRebuild opens the database without enforcing the current schema —
+// the caller (Rebuild) is about to drop and recreate the events table, so
+// it must be allowed in even when the on-disk layout is out of date.
+func openForRebuild(dbPath string) (*Store, error) {
+	db, err := openDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{db: db}, nil
+}
+
+func openDB(dbPath string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
 	}
@@ -74,31 +117,7 @@ func Open(dbPath string) (*Store, error) {
 	}
 	// Keep the pool small — one database, one writer at a time.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("apply schema: %w", err)
-	}
-	if err := migrate(db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("migrate: %w", err)
-	}
-	return &Store{db: db}, nil
-}
-
-// migrate brings older databases up to the current schema. Today that means
-// adding the `turns` column (it replaced `tools`); we leave any pre-existing
-// `tools` column in place so historical data isn't dropped on the floor.
-func migrate(db *sql.DB) error {
-	cols, err := tableColumns(db, "events")
-	if err != nil {
-		return err
-	}
-	if _, ok := cols["turns"]; !ok {
-		if _, err := db.Exec(`ALTER TABLE events ADD COLUMN turns TEXT`); err != nil {
-			return fmt.Errorf("add turns column: %w", err)
-		}
-	}
-	return nil
+	return db, nil
 }
 
 func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
@@ -239,11 +258,29 @@ func (s *Store) Clear() error {
 	return nil
 }
 
-// Rebuild clears the DB and bulk-inserts every row found in the JSONL files
-// at paths. Returns the number of rows inserted.
-func (s *Store) Rebuild(paths []string) (int, error) {
-	if err := s.Clear(); err != nil {
+// RebuildAt opens dbPath without enforcing the current schema, then drops
+// the events table and reingests from paths. This is what `rex timeline
+// rebuild` calls so it works even when Open would have rejected the DB
+// with ErrStaleSchema.
+func RebuildAt(dbPath string, paths []string) (int, error) {
+	s, err := openForRebuild(dbPath)
+	if err != nil {
 		return 0, err
+	}
+	defer s.Close()
+	return s.Rebuild(paths)
+}
+
+// Rebuild drops the events table, recreates it with the current schema, and
+// bulk-inserts every row found in the JSONL files at paths. Returns the
+// number of rows inserted. This is the only path that brings a stale DB up
+// to the current schema — the user runs `rex timeline rebuild` to reindex.
+func (s *Store) Rebuild(paths []string) (int, error) {
+	if _, err := s.db.Exec(`DROP TABLE IF EXISTS events`); err != nil {
+		return 0, fmt.Errorf("drop events: %w", err)
+	}
+	if _, err := s.db.Exec(schema); err != nil {
+		return 0, fmt.Errorf("apply schema: %w", err)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {

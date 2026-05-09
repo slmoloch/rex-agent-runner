@@ -326,8 +326,8 @@ func clipJSONStrings(v any, max int) any {
 	}
 }
 
-// clipString shortens s to at most max bytes (rune-safe) and appends a
-// "…[clipped]" marker so callers can tell the original was longer.
+// clipString shortens s to at most max bytes (rune-safe) and appends an
+// ellipsis so callers can tell the original was longer.
 func clipString(s string, max int) string {
 	if max <= 0 || len(s) <= max {
 		return s
@@ -337,7 +337,7 @@ func clipString(s string, max int) string {
 	for cut > 0 && (s[cut]&0xC0) == 0x80 {
 		cut--
 	}
-	return s[:cut] + "…[clipped]"
+	return s[:cut] + "…"
 }
 
 func toolInputPreview(v any) string {
