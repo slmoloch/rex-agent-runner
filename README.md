@@ -55,6 +55,8 @@ What `rex` adds:
   indexed in SQLite. The point: nothing the agent does should be a black
   box — `rex timeline` and the dashboard show exactly what happened.
 
+  ![Rex timeline dashboard showing per-session swimlanes and an expanded event with prompt, cost, duration, and tool calls](docs/timeline.png)
+
 What `rex` deliberately does *not* have:
 
 - **A memory layer.** Memory lives in plain markdown files
