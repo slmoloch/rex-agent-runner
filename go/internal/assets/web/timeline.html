@@ -271,6 +271,65 @@
     white-space: pre-wrap;
     word-break: break-all;
   }
+  .tool-field { margin-top: 6px; font-size: 11px; }
+  .tool-field-label {
+    display: inline-block;
+    min-width: 64px;
+    color: #6e7681;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-weight: 600;
+    vertical-align: top;
+  }
+  .tool-field-value {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    color: #c9d1d9;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .tool-field-value.is-desc {
+    font-family: inherit;
+    color: #8b949e;
+    font-style: italic;
+  }
+  .tool-cmd {
+    margin-top: 6px;
+    background: #010409;
+    border: 1px solid #21262d;
+    border-left: 3px solid #58a6ff;
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 11px;
+    color: #d2a8ff;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .tool-path {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 11px;
+    color: #79c0ff;
+    word-break: break-all;
+  }
+  .tool-diff {
+    margin-top: 6px;
+    background: #010409;
+    border: 1px solid #21262d;
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .tool-diff .diff-del { color: #f85149; }
+  .tool-diff .diff-add { color: #56d364; }
+  .tool-diff .diff-sep { color: #6e7681; }
   .tool-empty { color: #484f58; font-size: 12px; font-style: italic; }
   .tool-row.rex-user-tool {
     background: #0a2818;
@@ -814,17 +873,171 @@
     var out = '<div class="tool-list">';
     tools.forEach(function (tool) {
       out += '<div class="tool-row">' +
-        '<div class="tool-name">' + esc(tool.name || '?') + '</div>';
-      var input = tool.input;
-      if (input) {
-        if (typeof input !== 'string') {
-          try { input = JSON.stringify(input); } catch (e) { input = String(input); }
-        }
-        out += '<div class="tool-input">' + esc(input) + '</div>';
-      }
-      out += '</div>';
+        '<div class="tool-name">' + esc(tool.name || '?') + '</div>' +
+        renderToolInput(tool.name, tool.input) +
+        '</div>';
     });
     out += '</div>';
+    return out;
+  }
+
+  function renderToolInput(name, input) {
+    if (input == null || input === '') return '';
+    var obj = input;
+    if (typeof obj === 'string') {
+      try { obj = JSON.parse(obj); } catch (e) {
+        return '<div class="tool-input">' + esc(input) + '</div>';
+      }
+    }
+    if (typeof obj !== 'object') {
+      return '<div class="tool-input">' + esc(String(obj)) + '</div>';
+    }
+
+    switch (name) {
+      case 'Bash':       return renderBashInput(obj);
+      case 'Read':       return renderReadInput(obj);
+      case 'Write':      return renderWriteInput(obj);
+      case 'Edit':       return renderEditInput(obj);
+      case 'NotebookEdit': return renderEditInput(obj);
+      case 'Grep':       return renderGrepInput(obj);
+      case 'Glob':       return renderGlobInput(obj);
+      case 'WebFetch':
+      case 'WebSearch':  return renderWebInput(obj);
+      case 'TodoWrite':  return renderTodoInput(obj);
+      case 'Task':       return renderTaskInput(obj);
+    }
+    return renderGenericInput(obj);
+  }
+
+  function field(label, value, cls) {
+    if (value == null || value === '') return '';
+    return '<div class="tool-field">' +
+      '<span class="tool-field-label">' + esc(label) + '</span>' +
+      '<span class="tool-field-value' + (cls ? ' ' + cls : '') + '">' + esc(value) + '</span>' +
+      '</div>';
+  }
+
+  function renderBashInput(o) {
+    var out = '';
+    if (o.description) {
+      out += '<div class="tool-field"><span class="tool-field-value is-desc">' + esc(o.description) + '</span></div>';
+    }
+    if (o.command) out += '<div class="tool-cmd">' + esc(o.command) + '</div>';
+    if (o.timeout) out += field('timeout', o.timeout + 'ms');
+    if (o.run_in_background) out += field('background', 'true');
+    return out;
+  }
+
+  function renderReadInput(o) {
+    var out = '';
+    if (o.file_path) out += '<div class="tool-path">' + esc(o.file_path) + '</div>';
+    var range = '';
+    if (o.offset != null && o.limit != null) range = 'lines ' + o.offset + '–' + (Number(o.offset) + Number(o.limit));
+    else if (o.offset != null) range = 'from line ' + o.offset;
+    else if (o.limit != null) range = 'first ' + o.limit + ' lines';
+    if (range) out += field('range', range);
+    if (o.pages) out += field('pages', o.pages);
+    return out;
+  }
+
+  function renderWriteInput(o) {
+    var out = '';
+    if (o.file_path) out += '<div class="tool-path">' + esc(o.file_path) + '</div>';
+    if (o.content != null) {
+      var c = String(o.content);
+      var preview = c.length > 600 ? c.slice(0, 600) + '\n…' : c;
+      out += '<div class="tool-cmd">' + esc(preview) + '</div>';
+    }
+    return out;
+  }
+
+  function renderEditInput(o) {
+    var out = '';
+    if (o.file_path) out += '<div class="tool-path">' + esc(o.file_path) + '</div>';
+    if (o.notebook_path) out += '<div class="tool-path">' + esc(o.notebook_path) + '</div>';
+    if (o.replace_all) out += field('mode', 'replace_all');
+    if (o.old_string != null || o.new_string != null) {
+      out += '<div class="tool-diff">' + renderDiff(o.old_string || '', o.new_string || '') + '</div>';
+    }
+    return out;
+  }
+
+  function renderDiff(oldStr, newStr) {
+    var lines = [];
+    String(oldStr).split('\n').forEach(function (l) {
+      lines.push('<span class="diff-del">- ' + esc(l) + '</span>');
+    });
+    if (oldStr && newStr) lines.push('<span class="diff-sep">───</span>');
+    String(newStr).split('\n').forEach(function (l) {
+      lines.push('<span class="diff-add">+ ' + esc(l) + '</span>');
+    });
+    return lines.join('\n');
+  }
+
+  function renderGrepInput(o) {
+    var out = '';
+    if (o.pattern) out += field('pattern', o.pattern);
+    if (o.path) out += field('path', o.path);
+    if (o.glob) out += field('glob', o.glob);
+    if (o.type) out += field('type', o.type);
+    if (o.output_mode) out += field('mode', o.output_mode);
+    if (o['-i']) out += field('flags', 'case-insensitive');
+    return out;
+  }
+
+  function renderGlobInput(o) {
+    var out = '';
+    if (o.pattern) out += field('pattern', o.pattern);
+    if (o.path) out += field('path', o.path);
+    return out;
+  }
+
+  function renderWebInput(o) {
+    var out = '';
+    if (o.url) out += field('url', o.url);
+    if (o.query) out += field('query', o.query);
+    if (o.prompt) out += field('prompt', o.prompt);
+    return out;
+  }
+
+  function renderTodoInput(o) {
+    if (!o.todos || !o.todos.length) return '<div class="tool-input">no todos</div>';
+    var out = '<div class="tool-field">';
+    o.todos.forEach(function (t) {
+      var mark = t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '→' : '○';
+      out += '<div class="tool-field-value">' + esc(mark + ' ' + (t.content || '')) + '</div>';
+    });
+    out += '</div>';
+    return out;
+  }
+
+  function renderTaskInput(o) {
+    var out = '';
+    if (o.subagent_type) out += field('agent', o.subagent_type);
+    if (o.description) out += field('task', o.description);
+    if (o.prompt) {
+      var p = String(o.prompt);
+      var preview = p.length > 400 ? p.slice(0, 400) + '…' : p;
+      out += '<div class="tool-cmd">' + esc(preview) + '</div>';
+    }
+    return out;
+  }
+
+  function renderGenericInput(o) {
+    var keys = Object.keys(o);
+    if (!keys.length) return '';
+    var out = '';
+    keys.forEach(function (k) {
+      var v = o[k];
+      if (v == null || v === '') return;
+      if (typeof v === 'object') {
+        try { v = JSON.stringify(v); } catch (e) { v = String(v); }
+      } else {
+        v = String(v);
+      }
+      if (v.length > 400) v = v.slice(0, 400) + '…';
+      out += field(k, v);
+    });
     return out;
   }
 
