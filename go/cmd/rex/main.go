@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/slmoloch/rex-agent-runner/internal/applog"
 	"github.com/slmoloch/rex-agent-runner/internal/callback"
 	"github.com/slmoloch/rex-agent-runner/internal/claude"
 	"github.com/slmoloch/rex-agent-runner/internal/config"
@@ -153,6 +154,12 @@ func runServe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	logDir := filepath.Join(cfg.ProjectDir(), "logs")
+	w, err := applog.New(logDir, true)
+	if err != nil {
+		return fmt.Errorf("init log writer: %w", err)
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	return daemon.Run(ctx, cfg)
 }
 

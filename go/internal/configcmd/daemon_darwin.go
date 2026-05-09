@@ -60,7 +60,7 @@ func (launchdController) Start(projectDir, rexBin string) error {
 	if err != nil {
 		return fmt.Errorf("launchctl load: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	fmt.Printf("Rex daemon started.\n  Logs: %s/daemon.log\n", logDir)
+	fmt.Printf("Rex daemon started.\n  Logs: %s/rex.<date>.log\n", logDir)
 	return nil
 }
 
