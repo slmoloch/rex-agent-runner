@@ -4,35 +4,79 @@
 It accepts prompts from a Telegram bot, dispatches scheduled jobs, exposes a
 local web dashboard, and tracks every turn in a queryable timeline.
 
-## Features
+## Why this exists
 
-- **Telegram bot front-end.** Chat with your agent from anywhere; the daemon
-  receives updates, runs Claude Code, and replies back. An allow-list pins the
-  bot to specific Telegram user IDs.
+I had a personal AI agent (OpenClaw) running my life for a while — cron
+jobs, email triage, calendar, the works. Two things eventually nagged me
+enough to rewrite it:
+
+1. **It billed by the token via the API.** Pay-per-token never made sense
+   for something running 24/7. I already pay for a Claude subscription
+   that I live in all day for coding — I wanted the agent on the same
+   subscription, not a second meter.
+2. **It was a separate world from where I actually work.** Claude Code is
+   my daily workhorse; my agent should be running on the same engine, with
+   the same tools, the same shell, the same files.
+
+There's also a Feynman line I keep coming back to: *"What I cannot create,
+I do not understand."* I wanted to actually understand how this stuff works
+under the hood — not just glue someone else's framework together.
+
+## How it works
+
+Most of what an agent runner needs is already inside Claude Code: shell
+access, file editing, every CLI tool on the host, the LLM loop itself.
+The agent runtime is already there. `rex` is the thin layer around it.
+
+What `rex` adds:
+
+- **An always-on daemon.** Single Go binary that just keeps running.
+  No webhook server, no cloud component, no Python deps. Installed under
+  `launchd` (macOS) or `systemd` (Linux) via `rex start`.
+- **Telegram as the UI.** The daemon speaks the bot protocol natively —
+  Telegram *is* the interface, no other UI to maintain. (There's also a
+  local web dashboard at `127.0.0.1:9821` for inspecting sessions, events,
+  and live agent activity.)
+- **Tools for the agent to ping the user.** `rex user text|voice|file`
+  lets the agent surface progress, audio replies, or attachments at any
+  point — not just at the end of a turn.
+- **Tools for the agent to schedule its own callbacks.** `rex callback
+  create "<prompt>" --schedule "<cron>"` (or `--at`, `+5m`, …) lets the
+  agent wake itself up later, run a prompt, and ping back. Optional
+  `--command` runs a pre-check whose stdout feeds into the prompt; a
+  non-zero exit skips the run.
+- **Session management + recycling.** A `main` session persists across
+  messages; auxiliary sessions are tracked, listed, reset, and
+  garbage-collected on a 30-minute schedule. Sessions auto-recycle so
+  last week's noise doesn't bleed into today's work.
+- **A skill system.** Drop reusable instruction packs into
+  `workspace/skills/`; the agent enumerates them via `rex skills list`.
+- **A timeline store.** Every event is appended to JSONL audit logs and
+  indexed in SQLite. The point: nothing the agent does should be a black
+  box — `rex timeline` and the dashboard show exactly what happened.
+
+What `rex` deliberately does *not* have:
+
+- **A memory layer.** Memory lives in plain markdown files
+  (`workspace/agent.md`, `workspace/memory.md`, or wherever you point the
+  agent), and the agent reads/writes them with its normal file tools. No
+  bespoke schema, no embedding store, no vector DB.
+- **A roster of preset subagents.** There's one agent. Different "modes"
+  emerge from sessions and skills loaded into the workspace — not from a
+  fixed cast of named personas (`code-reviewer`, `researcher`, `planner`,
+  …). One brain with context, not a committee.
+
+## Other features
+
 - **Voice in / voice out.** Optional OpenAI-powered speech-to-text for incoming
   voice notes and text-to-speech replies via `rex user voice`.
-- **Local web dashboard.** Embedded UI at `http://127.0.0.1:9821/` for browsing
-  events, sessions, and live agent activity, backed by JSON APIs.
-- **Persistent sessions.** A "main" session is preserved across messages, with
-  additional sessions tracked, listed, reset, and garbage-collected on a 30m
-  schedule.
-- **Scheduled callbacks.** Recurring (`--schedule "<cron>"`) or one-shot
-  (`--at "HH:MM"`, `+5m`, `+2h`, …) prompts. Optional `--command` runs a
-  pre-check whose stdout is fed into the prompt; non-zero exit skips the run.
+- **Telegram allow-list.** The bot is pinned to specific Telegram user IDs, so
+  only you can drive your agent.
 - **Dispatch CLI.** `rex dispatch <session> <message>` sends a prompt into the
   bot pipeline from scripts or other tools.
-- **Skills.** Drop reusable instruction packs into the workspace's `skills/`
-  folder; `rex skills list` enumerates them for the agent.
-- **Timeline store.** Every event is appended to JSONL audit logs and indexed
-  in SQLite for fast queries (`rex timeline stats|rebuild|clear`).
-- **User channel.** Agents call back into the user via `rex user text|voice|file`
-  to surface progress, audio replies, or attachments outside a turn.
 - **One-shot project setup.** `rex init` scaffolds a `workspace/` with
   `agent.md` and `memory.md`, records the project dir, and runs interactive
   config.
-- **Process-manager integration.** `rex start|stop|restart|status` installs the
-  daemon under launchd (macOS) or systemd (Linux) and tails its logs with
-  `rex logs -f`.
 
 ## Install
 
