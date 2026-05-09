@@ -838,6 +838,12 @@
     var cost = ev.cost_usd != null ? '$' + ev.cost_usd.toFixed(4) : '-';
 
     var html = '';
+    if (ev.prompt_preview) {
+      html += '<div class="modal-section">' +
+        '<div class="modal-label">Prompt</div>' +
+        '<div class="modal-content">' + esc(ev.prompt_preview) + '</div></div>';
+    }
+
     html += '<div class="modal-section"><div class="modal-meta-grid">' +
       '<div><span class="k">Session:</span> ' + esc(ev.session || '-') + '</div>' +
       '<div><span class="k">Duration:</span> ' + dur + '</div>' +
@@ -861,12 +867,6 @@
     html += '<div class="modal-section">' +
       '<div class="modal-label">Tools used (' + (ev.tools ? ev.tools.length : 0) + ')</div>' +
       renderTools(ev.tools) + '</div>';
-
-    if (ev.prompt_preview) {
-      html += '<div class="modal-section">' +
-        '<div class="modal-label">Prompt</div>' +
-        '<div class="modal-content">' + esc(ev.prompt_preview) + '</div></div>';
-    }
     if (ev.response_preview) {
       html += '<div class="modal-section">' +
         '<div class="modal-label">Response</div>' +
