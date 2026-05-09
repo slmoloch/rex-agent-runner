@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rex Callbacks</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0d1117;
+    color: #c9d1d9;
+    min-height: 100vh;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 24px;
+    border-bottom: 1px solid #21262d;
+    background: #161b22;
+  }
+  header h1 { font-size: 18px; font-weight: 600; color: #e6edf3; }
+  header nav a {
+    color: #58a6ff;
+    text-decoration: none;
+    font-size: 14px;
+    margin-left: 16px;
+  }
+  header nav a:hover { text-decoration: underline; }
+
+  #controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 24px;
+    border-bottom: 1px solid #21262d;
+    background: #161b22;
+    font-size: 13px;
+  }
+  #controls button {
+    background: #0d1117;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #controls button:hover { border-color: #58a6ff; }
+  #status { color: #8b949e; margin-left: auto; }
+
+  main { padding: 18px 24px; }
+
+  .empty {
+    color: #484f58;
+    font-size: 14px;
+    text-align: center;
+    padding: 40px 0;
+  }
+
+  .cb-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 980px;
+  }
+  .cb-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .cb-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  .cb-id {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: #e6edf3;
+  }
+  .badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .badge.recurring { background: #1f3a5f; color: #79c0ff; }
+  .badge.oneshot { background: #3a2a1f; color: #f0b070; }
+  .badge.session {
+    background: #0a2818;
+    color: #56d364;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+  }
+  .cb-when {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 12px;
+    color: #8b949e;
+    margin-left: auto;
+  }
+  .cb-prompt {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #c9d1d9;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .cb-cmd {
+    margin-top: 8px;
+    background: #010409;
+    border: 1px solid #21262d;
+    border-left: 3px solid #58a6ff;
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 11px;
+    color: #d2a8ff;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .cb-cmd-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-top: 10px;
+    margin-bottom: 4px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Rex Callbacks</h1>
+  <nav><a href="/">&larr; Timeline</a></nav>
+</header>
+
+<div id="controls">
+  <button id="btn-refresh">Refresh</button>
+  <span id="status">Loading...</span>
+</div>
+
+<main>
+  <div id="list" class="cb-list"></div>
+</main>
+
+<script>
+(function () {
+  var REFRESH_MS = 30000;
+
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+  function render(rows) {
+    var list = document.getElementById('list');
+    if (!rows.length) {
+      list.innerHTML = '<div class="empty">No callbacks scheduled.</div>';
+      return;
+    }
+    var html = '';
+    rows.forEach(function (cb) {
+      var typeBadge = cb.recurring
+        ? '<span class="badge recurring">recurring</span>'
+        : '<span class="badge oneshot">one-shot</span>';
+      var sessionBadge = cb.session
+        ? '<span class="badge session">' + esc(cb.session) + '</span>'
+        : '';
+      var when = cb.recurring ? (cb.schedule || '') : (cb.at || '');
+      html += '<div class="cb-card">' +
+        '<div class="cb-head">' +
+          '<span class="cb-id">' + esc(cb.id) + '</span>' +
+          typeBadge +
+          sessionBadge +
+          (when ? '<span class="cb-when">' + esc(when) + '</span>' : '') +
+        '</div>' +
+        '<div class="cb-prompt">' + esc(cb.prompt || '') + '</div>' +
+        (cb.command
+          ? '<div class="cb-cmd-label">Pre-check command</div>' +
+            '<div class="cb-cmd">' + esc(cb.command) + '</div>'
+          : '') +
+        '</div>';
+    });
+    list.innerHTML = html;
+  }
+
+  function fetchData() {
+    document.getElementById('status').textContent = 'Loading...';
+    fetch('/api/callbacks')
+      .then(function (r) { return r.json(); })
+      .then(function (rows) {
+        render(rows || []);
+        document.getElementById('status').textContent =
+          (rows ? rows.length : 0) + ' callbacks · ' + new Date().toLocaleTimeString();
+      })
+      .catch(function () {
+        document.getElementById('status').textContent = 'Error loading callbacks';
+      });
+  }
+
+  document.getElementById('btn-refresh').addEventListener('click', fetchData);
+  fetchData();
+  setInterval(fetchData, REFRESH_MS);
+})();
+</script>
+</body>
+</html>

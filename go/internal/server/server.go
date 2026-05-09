@@ -12,6 +12,7 @@ import (
 	"net/http"
 
 	"github.com/slmoloch/rex-agent-runner/internal/assets"
+	"github.com/slmoloch/rex-agent-runner/internal/callback"
 	"github.com/slmoloch/rex-agent-runner/internal/session"
 	"github.com/slmoloch/rex-agent-runner/internal/timeline"
 )
@@ -20,15 +21,16 @@ import (
 type JobFunc func(ctx context.Context, prompt, jobName, sessionTarget, callerSession string) (string, error)
 
 type Server struct {
-	timeline *timeline.Store
-	session  *session.Store
-	job      JobFunc
+	timeline  *timeline.Store
+	session   *session.Store
+	callbacks *callback.Store
+	job       JobFunc
 }
 
 // New wires the dashboard and JSON APIs. The timeline store is the read path
 // for /api/events (indexed SQLite queries).
-func New(tl *timeline.Store, se *session.Store, job JobFunc) *Server {
-	return &Server{timeline: tl, session: se, job: job}
+func New(tl *timeline.Store, se *session.Store, cb *callback.Store, job JobFunc) *Server {
+	return &Server{timeline: tl, session: se, callbacks: cb, job: job}
 }
 
 // Routes returns an http.Handler mounting every rex endpoint.
@@ -37,23 +39,30 @@ func (s *Server) Routes() http.Handler {
 
 	// Dashboard (index) + static assets. `web/` is embedded into the binary.
 	webFS, _ := fs.Sub(assets.Web, "web")
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			data, err := fs.ReadFile(webFS, "timeline.html")
-			if err != nil {
-				http.Error(w, "timeline not found", http.StatusNotFound)
-				return
-			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = w.Write(data)
+	servePage := func(w http.ResponseWriter, name string) {
+		data, err := fs.ReadFile(webFS, name)
+		if err != nil {
+			http.Error(w, name+" not found", http.StatusNotFound)
 			return
 		}
-		http.NotFound(w, r)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(data)
+	}
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			servePage(w, "timeline.html")
+		case "/callbacks":
+			servePage(w, "callbacks.html")
+		default:
+			http.NotFound(w, r)
+		}
 	})
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(webFS))))
 
 	mux.HandleFunc("/api/events", s.handleEvents)
 	mux.HandleFunc("/api/sessions", s.handleSessions)
+	mux.HandleFunc("/api/callbacks", s.handleCallbacks)
 	mux.HandleFunc("/job", s.handleJob)
 	return mux
 }
@@ -95,6 +104,36 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 				rows[i], rows[j] = rows[j], rows[i]
 			}
 		}
+	}
+	writeJSON(w, rows)
+}
+
+func (s *Server) handleCallbacks(w http.ResponseWriter, r *http.Request) {
+	if s.callbacks == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	type row struct {
+		ID        string `json:"id"`
+		Prompt    string `json:"prompt"`
+		Recurring bool   `json:"recurring"`
+		Schedule  string `json:"schedule,omitempty"`
+		At        string `json:"at,omitempty"`
+		Session   string `json:"session,omitempty"`
+		Command   string `json:"command,omitempty"`
+	}
+	cbs := s.callbacks.List()
+	rows := make([]row, 0, len(cbs))
+	for _, cb := range cbs {
+		rows = append(rows, row{
+			ID:        cb.ID,
+			Prompt:    cb.Prompt,
+			Recurring: cb.Recurring,
+			Schedule:  cb.Schedule,
+			At:        cb.At,
+			Session:   cb.Session,
+			Command:   cb.Command,
+		})
 	}
 	writeJSON(w, rows)
 }

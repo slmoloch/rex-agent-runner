@@ -394,6 +394,7 @@
     <div class="legend-item"><div class="legend-swatch" style="background:#58a6ff"></div>reset</div>
     <div class="legend-item"><div class="legend-swatch" style="background:#56d364;border-radius:50%"></div>&rarr; rex user</div>
   </div>
+  <nav><a href="/callbacks">Callbacks</a></nav>
 </header>
 
 <div id="controls">
@@ -850,12 +851,6 @@
     var cost = ev.cost_usd != null ? '$' + ev.cost_usd.toFixed(4) : '-';
 
     var html = '';
-    if (ev.prompt_preview) {
-      html += '<div class="modal-section">' +
-        '<div class="modal-label">Prompt</div>' +
-        '<div class="modal-content">' + esc(ev.prompt_preview) + '</div></div>';
-    }
-
     html += '<div class="modal-section"><div class="modal-meta-grid">' +
       '<div><span class="k">Session:</span> ' + esc(ev.session || '-') + '</div>' +
       '<div><span class="k">Duration:</span> ' + dur + '</div>' +
@@ -874,6 +869,12 @@
       html += '<div class="modal-section">' +
         '<div class="modal-label">Sent to user (' + ev.rex_user_sends.length + ')</div>' +
         renderRexUserSends(ev.rex_user_sends) + '</div>';
+    }
+
+    if (ev.prompt_preview) {
+      html += '<div class="modal-section">' +
+        '<div class="modal-label">Prompt</div>' +
+        '<div class="modal-content">' + esc(ev.prompt_preview) + '</div></div>';
     }
 
     var turns = normalizeTurns(ev);
