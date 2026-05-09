@@ -109,7 +109,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	d.cleanupStaleTurnMarkers()
 
-	srv, err := server.Listen(port, server.New(tlStore, seStore, d.RunJob).Routes())
+	srv, err := server.Listen(port, server.New(tlStore, seStore, cbStore, d.RunJob).Routes())
 	if err != nil {
 		return err
 	}
