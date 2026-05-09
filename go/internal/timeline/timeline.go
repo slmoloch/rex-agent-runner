@@ -11,6 +11,7 @@ package timeline
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,6 +20,12 @@ import (
 
 	_ "modernc.org/sqlite" // pure-Go driver; registers as "sqlite"
 )
+
+// ErrStaleSchema is returned by Open when the events table exists but is
+// missing columns this build expects. The user has to run
+// `rex timeline rebuild` to reindex from the JSONL audit log — we never
+// rewrite their on-disk schema in place.
+var ErrStaleSchema = errors.New("timeline: events.db schema is out of date; run `rex timeline rebuild` to reindex")
 
 const schema = `
 CREATE TABLE IF NOT EXISTS events (
@@ -33,14 +40,14 @@ CREATE TABLE IF NOT EXISTS events (
     duration_ms INTEGER,
     num_turns INTEGER,
     caller_session TEXT,
-    tools TEXT,
+    turns TEXT,
     rex_user_sends TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_sid ON events(session_id);
 `
 
-// Row mirrors the events table. Tools/RexUserSends are stored as JSON text
+// Row mirrors the events table. Turns/RexUserSends are stored as JSON text
 // and decoded on read so callers get native types.
 type Row struct {
 	Timestamp       string  `json:"timestamp"`
@@ -53,7 +60,7 @@ type Row struct {
 	DurationMS      int     `json:"duration_ms,omitempty"`
 	NumTurns        int     `json:"num_turns,omitempty"`
 	CallerSession   string  `json:"caller_session,omitempty"`
-	Tools           any     `json:"tools,omitempty"`
+	Turns           any     `json:"turns,omitempty"`
 	RexUserSends    any     `json:"rex_user_sends,omitempty"`
 }
 
@@ -61,8 +68,44 @@ type Store struct {
 	db *sql.DB
 }
 
-// Open creates or opens the SQLite database and applies the schema.
+// Open creates or opens the SQLite database and applies the schema. If the
+// table exists but is missing columns from the current schema (e.g. the
+// `turns` column added when tool-call clipping was reworked), Open returns
+// ErrStaleSchema rather than rewriting the on-disk layout — the user is
+// expected to run `rex timeline rebuild` to reindex.
 func Open(dbPath string) (*Store, error) {
+	db, err := openDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	cols, err := tableColumns(db, "events")
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, ok := cols["turns"]; !ok {
+		db.Close()
+		return nil, ErrStaleSchema
+	}
+	return &Store{db: db}, nil
+}
+
+// openForRebuild opens the database without enforcing the current schema —
+// the caller (Rebuild) is about to drop and recreate the events table, so
+// it must be allowed in even when the on-disk layout is out of date.
+func openForRebuild(dbPath string) (*Store, error) {
+	db, err := openDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{db: db}, nil
+}
+
+func openDB(dbPath string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
 	}
@@ -74,18 +117,38 @@ func Open(dbPath string) (*Store, error) {
 	}
 	// Keep the pool small — one database, one writer at a time.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("apply schema: %w", err)
+	return db, nil
+}
+
+func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%q)", table))
+	if err != nil {
+		return nil, err
 	}
-	return &Store{db: db}, nil
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) Close() error { return s.db.Close() }
 
 // Insert appends one event row.
 func (s *Store) Insert(r Row) error {
-	tools, err := encodeJSON(r.Tools)
+	turns, err := encodeJSON(r.Turns)
 	if err != nil {
 		return err
 	}
@@ -98,12 +161,12 @@ func (s *Store) Insert(r Row) error {
 			timestamp, session, session_id, trigger,
 			prompt_preview, response_preview,
 			cost_usd, duration_ms, num_turns, caller_session,
-			tools, rex_user_sends
+			turns, rex_user_sends
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.Timestamp, r.Session, r.SessionID, r.Trigger,
 		r.PromptPreview, r.ResponsePreview,
 		r.CostUSD, r.DurationMS, r.NumTurns, r.CallerSession,
-		tools, sends,
+		turns, sends,
 	)
 	return err
 }
@@ -120,7 +183,7 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 			`SELECT timestamp, session, session_id, trigger,
 			        prompt_preview, response_preview,
 			        cost_usd, duration_ms, num_turns, caller_session,
-			        tools, rex_user_sends
+			        turns, rex_user_sends
 			 FROM events WHERE timestamp > ?
 			 ORDER BY timestamp DESC`, since)
 	} else {
@@ -129,7 +192,7 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 			`SELECT timestamp, session, session_id, trigger,
 			        prompt_preview, response_preview,
 			        cost_usd, duration_ms, num_turns, caller_session,
-			        tools, rex_user_sends
+			        turns, rex_user_sends
 			 FROM events WHERE timestamp >= ?
 			 ORDER BY timestamp DESC`, cutoff)
 	}
@@ -141,18 +204,18 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 	var out []Row
 	for rows.Next() {
 		var (
-			r              Row
-			tools, sends   sql.NullString
+			r            Row
+			turns, sends sql.NullString
 		)
 		if err := rows.Scan(
 			&r.Timestamp, &r.Session, &r.SessionID, &r.Trigger,
 			&r.PromptPreview, &r.ResponsePreview,
 			&r.CostUSD, &r.DurationMS, &r.NumTurns, &r.CallerSession,
-			&tools, &sends,
+			&turns, &sends,
 		); err != nil {
 			return nil, err
 		}
-		r.Tools = decodeJSON(tools)
+		r.Turns = decodeJSON(turns)
 		r.RexUserSends = decodeJSON(sends)
 		out = append(out, r)
 	}
@@ -195,11 +258,29 @@ func (s *Store) Clear() error {
 	return nil
 }
 
-// Rebuild clears the DB and bulk-inserts every row found in the JSONL files
-// at paths. Returns the number of rows inserted.
-func (s *Store) Rebuild(paths []string) (int, error) {
-	if err := s.Clear(); err != nil {
+// RebuildAt opens dbPath without enforcing the current schema, then drops
+// the events table and reingests from paths. This is what `rex timeline
+// rebuild` calls so it works even when Open would have rejected the DB
+// with ErrStaleSchema.
+func RebuildAt(dbPath string, paths []string) (int, error) {
+	s, err := openForRebuild(dbPath)
+	if err != nil {
 		return 0, err
+	}
+	defer s.Close()
+	return s.Rebuild(paths)
+}
+
+// Rebuild drops the events table, recreates it with the current schema, and
+// bulk-inserts every row found in the JSONL files at paths. Returns the
+// number of rows inserted. This is the only path that brings a stale DB up
+// to the current schema — the user runs `rex timeline rebuild` to reindex.
+func (s *Store) Rebuild(paths []string) (int, error) {
+	if _, err := s.db.Exec(`DROP TABLE IF EXISTS events`); err != nil {
+		return 0, fmt.Errorf("drop events: %w", err)
+	}
+	if _, err := s.db.Exec(schema); err != nil {
+		return 0, fmt.Errorf("apply schema: %w", err)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -215,7 +296,7 @@ func (s *Store) Rebuild(paths []string) (int, error) {
 			timestamp, session, session_id, trigger,
 			prompt_preview, response_preview,
 			cost_usd, duration_ms, num_turns, caller_session,
-			tools, rex_user_sends
+			turns, rex_user_sends
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return 0, err

@@ -31,7 +31,7 @@ type Event struct {
 	DurationMS      int     `json:"duration_ms,omitempty"`
 	NumTurns        int     `json:"num_turns,omitempty"`
 	CallerSession   string  `json:"caller_session,omitempty"`
-	Tools           any     `json:"tools,omitempty"`
+	Turns           any     `json:"turns,omitempty"`
 	RexUserSends    any     `json:"rex_user_sends,omitempty"`
 }
 
@@ -94,7 +94,7 @@ func timelineRow(e Event) timeline.Row {
 		DurationMS:      e.DurationMS,
 		NumTurns:        e.NumTurns,
 		CallerSession:   e.CallerSession,
-		Tools:           e.Tools,
+		Turns:           e.Turns,
 		RexUserSends:    e.RexUserSends,
 	}
 }

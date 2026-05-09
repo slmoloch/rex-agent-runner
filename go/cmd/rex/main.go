@@ -281,7 +281,26 @@ func runTimeline(args []string) error {
 		return err
 	}
 	ws := workspace.New(mustWorkspaceDir(cfg))
-	tl, err := timeline.Open(filepath.Join(ws.Root, "events.db"))
+	dbPath := filepath.Join(ws.Root, "events.db")
+
+	// Rebuild has to work on a stale DB — that's the reason the user is
+	// running it. So it bypasses the schema check; everything else opens
+	// normally and surfaces ErrStaleSchema with a "run rebuild" hint.
+	if args[0] == "rebuild" {
+		paths := events.JSONLFiles(ws.EventsDir, ws.LegacyEvents)
+		if len(paths) == 0 {
+			fmt.Println("No JSONL files to rebuild from.")
+			return nil
+		}
+		n, err := timeline.RebuildAt(dbPath, paths)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Rebuilt %d events into %s\n", n, dbPath)
+		return nil
+	}
+
+	tl, err := timeline.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("open timeline db: %w", err)
 	}
@@ -297,18 +316,6 @@ func runTimeline(args []string) error {
 		fmt.Printf("Sessions: %d\n", st.Sessions)
 		fmt.Printf("Range:    %s to %s\n", orDash(st.Oldest), orDash(st.Newest))
 		fmt.Printf("Cost:     $%.4f\n", st.Cost)
-		return nil
-	case "rebuild":
-		paths := events.JSONLFiles(ws.EventsDir, ws.LegacyEvents)
-		if len(paths) == 0 {
-			fmt.Println("No JSONL files to rebuild from.")
-			return nil
-		}
-		n, err := tl.Rebuild(paths)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Rebuilt %d events into %s\n", n, filepath.Join(ws.Root, "events.db"))
 		return nil
 	case "clear":
 		if err := tl.Clear(); err != nil {

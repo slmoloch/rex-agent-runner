@@ -22,7 +22,15 @@ func ingest(stmt *sql.Stmt, r io.Reader) (int, error) {
 		if err := json.Unmarshal(line, &raw); err != nil {
 			continue
 		}
-		tools, _ := encodeJSON(raw["tools"])
+		// Prefer the new `turns` key; older JSONL files only have `tools`,
+		// which we adapt to a turns-shaped list so the DB stays homogeneous.
+		var turnsVal any
+		if v, ok := raw["turns"]; ok {
+			turnsVal = v
+		} else {
+			turnsVal = legacyToolsToTurns(raw["tools"])
+		}
+		turns, _ := encodeJSON(turnsVal)
 		sends, _ := encodeJSON(raw["rex_user_sends"])
 		if _, err := stmt.Exec(
 			asStr(raw["timestamp"]),
@@ -35,7 +43,7 @@ func ingest(stmt *sql.Stmt, r io.Reader) (int, error) {
 			asInt(raw["duration_ms"]),
 			asInt(raw["num_turns"]),
 			asStr(raw["caller_session"]),
-			tools,
+			turns,
 			sends,
 		); err != nil {
 			return count, err
@@ -75,4 +83,40 @@ func asInt(v any) int {
 		return int(n)
 	}
 	return 0
+}
+
+// legacyToolsToTurns converts the pre-turns `tools` JSONL field — a list of
+// {name, input(string)} — into the unified turns shape so old logs replay
+// cleanly into the new DB column. Inputs that happen to be valid JSON are
+// reparsed into objects; otherwise they're kept as raw strings.
+func legacyToolsToTurns(v any) any {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]any, 0, len(arr))
+	for _, item := range arr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		turn := map[string]any{"type": "tool"}
+		if name, ok := m["name"].(string); ok {
+			turn["name"] = name
+		}
+		if input, ok := m["input"]; ok {
+			if s, ok := input.(string); ok {
+				var parsed any
+				if err := json.Unmarshal([]byte(s), &parsed); err == nil {
+					turn["input"] = parsed
+				} else {
+					turn["input"] = s
+				}
+			} else {
+				turn["input"] = input
+			}
+		}
+		out = append(out, turn)
+	}
+	return out
 }
