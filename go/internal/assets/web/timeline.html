@@ -545,6 +545,7 @@
 
     xAxisG = svg.append('g').attr('class', 'g-axis').attr('transform', 'translate(0,' + AXIS_H + ')');
 
+    var prevTy = 0;
     zoomBehavior = d3.zoom().scaleExtent([0.05, 200])
       .filter(function (event) {
         // Wheel: zoom (plain), or pan vertically when shift held (default browser scroll fallthrough)
@@ -552,8 +553,18 @@
         // Mouse/touch: only left-button drag pans
         return !event.button;
       })
-      .on('start', function () { svg.node().classList.add('is-dragging'); })
+      .on('start', function (ev) {
+        svg.node().classList.add('is-dragging');
+        prevTy = ev.transform ? ev.transform.y : 0;
+      })
       .on('zoom', function (ev) {
+        var dy = ev.transform.y - prevTy;
+        prevTy = ev.transform.y;
+        var src = ev.sourceEvent;
+        if (dy !== 0 && src && (src.type === 'mousemove' || src.type === 'pointermove' || src.type === 'touchmove')) {
+          var wrap = document.getElementById('chart-wrap');
+          wrap.scrollTop -= dy;
+        }
         curTransform = ev.transform;
         applyZoom();
       })
@@ -827,6 +838,12 @@
     var cost = ev.cost_usd != null ? '$' + ev.cost_usd.toFixed(4) : '-';
 
     var html = '';
+    if (ev.prompt_preview) {
+      html += '<div class="modal-section">' +
+        '<div class="modal-label">Prompt</div>' +
+        '<div class="modal-content">' + esc(ev.prompt_preview) + '</div></div>';
+    }
+
     html += '<div class="modal-section"><div class="modal-meta-grid">' +
       '<div><span class="k">Session:</span> ' + esc(ev.session || '-') + '</div>' +
       '<div><span class="k">Duration:</span> ' + dur + '</div>' +
@@ -850,12 +867,6 @@
     html += '<div class="modal-section">' +
       '<div class="modal-label">Tools used (' + (ev.tools ? ev.tools.length : 0) + ')</div>' +
       renderTools(ev.tools) + '</div>';
-
-    if (ev.prompt_preview) {
-      html += '<div class="modal-section">' +
-        '<div class="modal-label">Prompt</div>' +
-        '<div class="modal-content">' + esc(ev.prompt_preview) + '</div></div>';
-    }
     if (ev.response_preview) {
       html += '<div class="modal-section">' +
         '<div class="modal-label">Response</div>' +
