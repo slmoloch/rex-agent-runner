@@ -108,6 +108,10 @@
     overflow-y: auto;
     position: relative;
   }
+  #chart-wrap svg { cursor: grab; }
+  #chart-wrap svg.is-dragging { cursor: grabbing; }
+  #chart-wrap svg .ev-block,
+  #chart-wrap svg .ev-dot { cursor: pointer; }
 
   .tooltip {
     position: fixed;
@@ -484,14 +488,18 @@
 
     zoomBehavior = d3.zoom().scaleExtent([0.05, 200])
       .filter(function (event) {
-        if (event.type === 'wheel') return event.ctrlKey || event.metaKey;
+        // Wheel: zoom (plain), or pan vertically when shift held (default browser scroll fallthrough)
+        if (event.type === 'wheel') return !event.shiftKey;
+        // Mouse/touch: only left-button drag pans
         return !event.button;
       })
+      .on('start', function () { svg.node().classList.add('is-dragging'); })
       .on('zoom', function (ev) {
         curTransform = ev.transform;
         applyZoom();
-      });
-    svg.call(zoomBehavior);
+      })
+      .on('end', function () { svg.node().classList.remove('is-dragging'); });
+    svg.call(zoomBehavior).on('dblclick.zoom', null);
   }
 
   // --- zoom ---
