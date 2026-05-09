@@ -70,7 +70,7 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 		DurationMS:      int(result.Duration.Milliseconds()),
 		NumTurns:        result.NumTurns,
 		CallerSession:   callerSession,
-		Tools:           result.Tools,
+		Turns:           result.Turns,
 	}
 	if usedRexUser {
 		ev.RexUserSends = result.RexUserSends

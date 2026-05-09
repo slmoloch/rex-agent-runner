@@ -29,8 +29,17 @@ type ContentBlock struct {
 	Input json.RawMessage `json:"input,omitempty"`
 }
 
-// ToolCall is a summary of one tool_use content block observed on the stream.
-type ToolCall struct {
-	Name  string `json:"name"`
-	Input string `json:"input"` // JSON-encoded, clipped for logs
+// Turn is one entry in the chronological log of what Claude produced during a
+// run: either an assistant text message ("text") or a tool invocation ("tool").
+// Long string fields are clipped on construction so the entire structure is
+// always valid JSON when serialized — never a half-cut string.
+type Turn struct {
+	Type string `json:"type"` // "text" | "tool"
+
+	// type=="text"
+	Text string `json:"text,omitempty"`
+
+	// type=="tool"
+	Name  string `json:"name,omitempty"`
+	Input any    `json:"input,omitempty"` // parsed object with long strings clipped
 }

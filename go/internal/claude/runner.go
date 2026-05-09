@@ -39,7 +39,7 @@ type Result struct {
 	CostUSD      float64       `json:"cost_usd"`
 	Duration     time.Duration `json:"duration_ms"`
 	NumTurns     int           `json:"num_turns"`
-	Tools        []ToolCall    `json:"tools"`
+	Turns        []Turn        `json:"turns"`
 	RexUserSends []RexUserSend `json:"rex_user_sends"`
 }
 
@@ -223,7 +223,7 @@ type runState struct {
 	costUSD      float64
 	numTurns     int
 	durationMS   int
-	tools        []ToolCall
+	turns        []Turn
 	sends        []RexUserSend
 }
 
@@ -234,10 +234,18 @@ func (s *runState) toResult(responseOverride string) *Result {
 		CostUSD:      s.costUSD,
 		Duration:     time.Duration(s.durationMS) * time.Millisecond,
 		NumTurns:     s.numTurns,
-		Tools:        s.tools,
+		Turns:        s.turns,
 		RexUserSends: s.sends,
 	}
 }
+
+// Per-string clip caps. Tool inputs are clipped per-field rather than as a
+// blob so the resulting JSON is always parseable; text turns are clipped as a
+// whole because they're free-form prose.
+const (
+	maxToolStringChars = 1000
+	maxTextTurnChars   = 4000
+)
 
 func parseLine(line []byte, s *runState) {
 	if len(line) == 0 {
@@ -263,19 +271,81 @@ func parseLine(line []byte, s *runState) {
 		for _, b := range ev.Message.Content {
 			switch b.Type {
 			case "tool_use":
-				input := string(b.Input)
-				if len(input) > 500 {
-					input = input[:500]
-				}
-				s.tools = append(s.tools, ToolCall{Name: b.Name, Input: input})
-				slog.Info("claude tool", "name", b.Name, "input", truncate(input, 200))
+				input := decodeAndClipToolInput(b.Input, maxToolStringChars)
+				s.turns = append(s.turns, Turn{Type: "tool", Name: b.Name, Input: input})
+				slog.Info("claude tool", "name", b.Name, "input", truncate(toolInputPreview(input), 200))
 			case "text":
-				if b.Text != "" {
-					slog.Info("claude text", "preview", truncate(b.Text, 300))
+				if b.Text == "" {
+					continue
 				}
+				text := clipString(b.Text, maxTextTurnChars)
+				s.turns = append(s.turns, Turn{Type: "text", Text: text})
+				slog.Info("claude text", "preview", truncate(b.Text, 300))
 			}
 		}
 	}
+}
+
+// decodeAndClipToolInput parses raw tool-use input JSON into a Go value and
+// clips every string leaf that exceeds max. If the raw bytes don't parse
+// (shouldn't happen for well-formed Claude output), it falls back to a
+// single-key object containing the clipped raw text so the resulting JSON
+// is still valid.
+func decodeAndClipToolInput(raw json.RawMessage, max int) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return map[string]any{"_raw": clipString(string(raw), max)}
+	}
+	return clipJSONStrings(v, max)
+}
+
+// clipJSONStrings walks an arbitrary JSON value and returns a copy where any
+// string leaf longer than max is shortened with an ellipsis suffix. Maps,
+// slices and primitives are returned as-is otherwise.
+func clipJSONStrings(v any, max int) any {
+	switch x := v.(type) {
+	case string:
+		return clipString(x, max)
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			out[k] = clipJSONStrings(val, max)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, val := range x {
+			out[i] = clipJSONStrings(val, max)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// clipString shortens s to at most max bytes (rune-safe) and appends a
+// "…[clipped]" marker so callers can tell the original was longer.
+func clipString(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	// Trim to a rune boundary so the output is always valid UTF-8.
+	cut := max
+	for cut > 0 && (s[cut]&0xC0) == 0x80 {
+		cut--
+	}
+	return s[:cut] + "…[clipped]"
+}
+
+func toolInputPreview(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // FindBin mirrors the _find_claude() probe order in claude_runner.py.

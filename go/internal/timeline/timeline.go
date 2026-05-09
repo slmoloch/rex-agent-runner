@@ -33,14 +33,14 @@ CREATE TABLE IF NOT EXISTS events (
     duration_ms INTEGER,
     num_turns INTEGER,
     caller_session TEXT,
-    tools TEXT,
+    turns TEXT,
     rex_user_sends TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_sid ON events(session_id);
 `
 
-// Row mirrors the events table. Tools/RexUserSends are stored as JSON text
+// Row mirrors the events table. Turns/RexUserSends are stored as JSON text
 // and decoded on read so callers get native types.
 type Row struct {
 	Timestamp       string  `json:"timestamp"`
@@ -53,7 +53,7 @@ type Row struct {
 	DurationMS      int     `json:"duration_ms,omitempty"`
 	NumTurns        int     `json:"num_turns,omitempty"`
 	CallerSession   string  `json:"caller_session,omitempty"`
-	Tools           any     `json:"tools,omitempty"`
+	Turns           any     `json:"turns,omitempty"`
 	RexUserSends    any     `json:"rex_user_sends,omitempty"`
 }
 
@@ -78,14 +78,58 @@ func Open(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// migrate brings older databases up to the current schema. Today that means
+// adding the `turns` column (it replaced `tools`); we leave any pre-existing
+// `tools` column in place so historical data isn't dropped on the floor.
+func migrate(db *sql.DB) error {
+	cols, err := tableColumns(db, "events")
+	if err != nil {
+		return err
+	}
+	if _, ok := cols["turns"]; !ok {
+		if _, err := db.Exec(`ALTER TABLE events ADD COLUMN turns TEXT`); err != nil {
+			return fmt.Errorf("add turns column: %w", err)
+		}
+	}
+	return nil
+}
+
+func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%q)", table))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) Close() error { return s.db.Close() }
 
 // Insert appends one event row.
 func (s *Store) Insert(r Row) error {
-	tools, err := encodeJSON(r.Tools)
+	turns, err := encodeJSON(r.Turns)
 	if err != nil {
 		return err
 	}
@@ -98,12 +142,12 @@ func (s *Store) Insert(r Row) error {
 			timestamp, session, session_id, trigger,
 			prompt_preview, response_preview,
 			cost_usd, duration_ms, num_turns, caller_session,
-			tools, rex_user_sends
+			turns, rex_user_sends
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.Timestamp, r.Session, r.SessionID, r.Trigger,
 		r.PromptPreview, r.ResponsePreview,
 		r.CostUSD, r.DurationMS, r.NumTurns, r.CallerSession,
-		tools, sends,
+		turns, sends,
 	)
 	return err
 }
@@ -120,7 +164,7 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 			`SELECT timestamp, session, session_id, trigger,
 			        prompt_preview, response_preview,
 			        cost_usd, duration_ms, num_turns, caller_session,
-			        tools, rex_user_sends
+			        turns, rex_user_sends
 			 FROM events WHERE timestamp > ?
 			 ORDER BY timestamp DESC`, since)
 	} else {
@@ -129,7 +173,7 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 			`SELECT timestamp, session, session_id, trigger,
 			        prompt_preview, response_preview,
 			        cost_usd, duration_ms, num_turns, caller_session,
-			        tools, rex_user_sends
+			        turns, rex_user_sends
 			 FROM events WHERE timestamp >= ?
 			 ORDER BY timestamp DESC`, cutoff)
 	}
@@ -141,18 +185,18 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 	var out []Row
 	for rows.Next() {
 		var (
-			r              Row
-			tools, sends   sql.NullString
+			r            Row
+			turns, sends sql.NullString
 		)
 		if err := rows.Scan(
 			&r.Timestamp, &r.Session, &r.SessionID, &r.Trigger,
 			&r.PromptPreview, &r.ResponsePreview,
 			&r.CostUSD, &r.DurationMS, &r.NumTurns, &r.CallerSession,
-			&tools, &sends,
+			&turns, &sends,
 		); err != nil {
 			return nil, err
 		}
-		r.Tools = decodeJSON(tools)
+		r.Turns = decodeJSON(turns)
 		r.RexUserSends = decodeJSON(sends)
 		out = append(out, r)
 	}
@@ -215,7 +259,7 @@ func (s *Store) Rebuild(paths []string) (int, error) {
 			timestamp, session, session_id, trigger,
 			prompt_preview, response_preview,
 			cost_usd, duration_ms, num_turns, caller_session,
-			tools, rex_user_sends
+			turns, rex_user_sends
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return 0, err

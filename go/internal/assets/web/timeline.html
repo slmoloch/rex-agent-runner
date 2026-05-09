@@ -331,6 +331,18 @@
   .tool-diff .diff-add { color: #56d364; }
   .tool-diff .diff-sep { color: #6e7681; }
   .tool-empty { color: #484f58; font-size: 12px; font-style: italic; }
+  .tool-row.text-turn {
+    background: #0d1726;
+    border-color: #1f3a5f;
+  }
+  .tool-row.text-turn .tool-name { color: #79c0ff; }
+  .tool-row.text-turn .tool-input {
+    color: #c9d1d9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    white-space: pre-wrap;
+    max-height: 240px;
+    overflow-y: auto;
+  }
   .tool-row.rex-user-tool {
     background: #0a2818;
     border-color: #2ea043;
@@ -864,9 +876,10 @@
         renderRexUserSends(ev.rex_user_sends) + '</div>';
     }
 
+    var turns = normalizeTurns(ev);
     html += '<div class="modal-section">' +
-      '<div class="modal-label">Tools used (' + (ev.tools ? ev.tools.length : 0) + ')</div>' +
-      renderTools(ev.tools) + '</div>';
+      '<div class="modal-label">Turns (' + turns.length + ')</div>' +
+      renderTurns(turns) + '</div>';
     if (ev.response_preview) {
       html += '<div class="modal-section">' +
         '<div class="modal-label">Response</div>' +
@@ -877,19 +890,48 @@
     backdrop.classList.add('visible');
   }
 
-  function renderTools(tools) {
-    if (!tools || !tools.length) {
-      return '<div class="tool-empty">No tool calls recorded.</div>';
+  // normalizeTurns returns the chronological list of turns for an event.
+  // Prefers the new `turns` field; falls back to the older `tools` field by
+  // wrapping each tool call as a turn so old data renders the same way.
+  function normalizeTurns(ev) {
+    if (Array.isArray(ev.turns)) return ev.turns;
+    if (Array.isArray(ev.tools)) {
+      return ev.tools.map(function (t) {
+        return { type: 'tool', name: t.name, input: t.input };
+      });
+    }
+    return [];
+  }
+
+  function renderTurns(turns) {
+    if (!turns.length) {
+      return '<div class="tool-empty">No turns recorded.</div>';
     }
     var out = '<div class="tool-list">';
-    tools.forEach(function (tool) {
-      out += '<div class="tool-row">' +
-        '<div class="tool-name">' + esc(tool.name || '?') + '</div>' +
-        renderToolInput(tool.name, tool.input) +
-        '</div>';
+    turns.forEach(function (turn) {
+      if (turn && turn.type === 'text') {
+        out += renderTextTurn(turn);
+      } else {
+        out += renderToolTurn(turn || {});
+      }
     });
     out += '</div>';
     return out;
+  }
+
+  function renderToolTurn(tool) {
+    return '<div class="tool-row">' +
+      '<div class="tool-name">' + esc(tool.name || '?') + '</div>' +
+      renderToolInput(tool.name, tool.input) +
+      '</div>';
+  }
+
+  function renderTextTurn(turn) {
+    var text = turn.text == null ? '' : String(turn.text);
+    return '<div class="tool-row text-turn">' +
+      '<div class="tool-name">assistant</div>' +
+      '<div class="tool-input">' + esc(text) + '</div>' +
+      '</div>';
   }
 
   function renderToolInput(name, input) {
