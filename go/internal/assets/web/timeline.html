@@ -545,6 +545,7 @@
 
     xAxisG = svg.append('g').attr('class', 'g-axis').attr('transform', 'translate(0,' + AXIS_H + ')');
 
+    var prevTy = 0;
     zoomBehavior = d3.zoom().scaleExtent([0.05, 200])
       .filter(function (event) {
         // Wheel: zoom (plain), or pan vertically when shift held (default browser scroll fallthrough)
@@ -552,8 +553,18 @@
         // Mouse/touch: only left-button drag pans
         return !event.button;
       })
-      .on('start', function () { svg.node().classList.add('is-dragging'); })
+      .on('start', function (ev) {
+        svg.node().classList.add('is-dragging');
+        prevTy = ev.transform ? ev.transform.y : 0;
+      })
       .on('zoom', function (ev) {
+        var dy = ev.transform.y - prevTy;
+        prevTy = ev.transform.y;
+        var src = ev.sourceEvent;
+        if (dy !== 0 && src && (src.type === 'mousemove' || src.type === 'pointermove' || src.type === 'touchmove')) {
+          var wrap = document.getElementById('chart-wrap');
+          wrap.scrollTop -= dy;
+        }
         curTransform = ev.transform;
         applyZoom();
       })
