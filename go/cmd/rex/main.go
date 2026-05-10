@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"syscall"
@@ -70,7 +72,10 @@ Callbacks:
 User channel (called by agents):
   user text <message>
   user voice <message>
-  user file <path> [caption]`
+  user file <path> [caption]
+
+Other:
+  version                          Show version, commit, and build info`
 
 func main() {
 	if err := run(); err != nil {
@@ -131,8 +136,8 @@ func run() error {
 		}
 		ws := workspace.New(mustWorkspaceDir(cfg))
 		return usercmd.Run(ctx, cfg, ws, args)
-	case "version":
-		fmt.Println("rex (go port) — dev")
+	case "version", "-v", "--version":
+		printVersion(os.Stdout)
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "rex: unknown command '%s'\n\n", cmd)
@@ -546,6 +551,45 @@ func mustWorkspaceDir(cfg *config.Config) string {
 		return ws
 	}
 	return abs
+}
+
+// version is the release tag. Override at build time:
+//
+//	go build -ldflags "-X main.version=v1.2.3" ./cmd/rex
+var version = "dev"
+
+func printVersion(w *os.File) {
+	commit, dirty, buildTime := buildVCS()
+	fmt.Fprintf(w, "rex %s\n", version)
+	if commit != "" {
+		suffix := ""
+		if dirty {
+			suffix = " (dirty)"
+		}
+		fmt.Fprintf(w, "  commit:  %s%s\n", commit, suffix)
+	}
+	if buildTime != "" {
+		fmt.Fprintf(w, "  built:   %s\n", buildTime)
+	}
+	fmt.Fprintf(w, "  go:      %s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+}
+
+func buildVCS() (commit string, dirty bool, buildTime string) {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "", false, ""
+	}
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			commit = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		case "vcs.time":
+			buildTime = s.Value
+		}
+	}
+	return commit, dirty, buildTime
 }
 
 func orDash(s string) string {
