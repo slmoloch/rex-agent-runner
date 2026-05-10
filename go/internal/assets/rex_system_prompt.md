@@ -1,8 +1,8 @@
 ## Skills
 
-Workspace skills are loaded from `.md` files in the `skills/` directory and included at the beginning of this system prompt. Always follow the instructions described in each skill when using the corresponding tools.
+Workspace skills live in the `skills/` directory. The index above (under `## Workspace Skills`) lists every skill's name, description, and path to its `SKILL.md`. When a user request matches a skill, read that `SKILL.md` with the Read tool and follow its instructions before acting.
 
-You can list available skills by running:
+You can also list available skills from the shell:
 ```bash
 rex skills
 ```

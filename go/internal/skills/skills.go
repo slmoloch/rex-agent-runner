@@ -44,28 +44,31 @@ func List(skillsDir string) ([]Skill, error) {
 	return out, nil
 }
 
-// LoadCombined returns every SKILL.md concatenated with the header rex injects
-// into the Claude system prompt. Returns "" when no skills exist.
-func LoadCombined(skillsDir string) (string, error) {
-	skills, err := List(skillsDir)
+// BuildPromptIndex returns the skills index rex injects into the Claude system
+// prompt: one bullet per skill with name, description, and path to SKILL.md.
+// The agent reads the matching SKILL.md on demand. Returns "" when no skills
+// exist.
+func BuildPromptIndex(skillsDir string) (string, error) {
+	list, err := List(skillsDir)
 	if err != nil {
 		return "", err
 	}
-	var parts []string
-	for _, s := range skills {
-		data, err := os.ReadFile(s.Path)
-		if err != nil {
-			continue
-		}
-		t := strings.TrimSpace(string(data))
-		if t != "" {
-			parts = append(parts, t)
-		}
-	}
-	if len(parts) == 0 {
+	if len(list) == 0 {
 		return "", nil
 	}
-	return "## Workspace Skills\n\n" + strings.Join(parts, "\n\n---\n\n"), nil
+	var b strings.Builder
+	b.WriteString("## Workspace Skills\n\n")
+	b.WriteString("When a user request matches one of these skills, read its `SKILL.md` with the Read tool and follow the instructions inside.\n\n")
+	for _, s := range list {
+		b.WriteString("- `")
+		b.WriteString(s.Name)
+		b.WriteString("` — ")
+		b.WriteString(s.Description)
+		b.WriteString("  \n  ")
+		b.WriteString(s.Path)
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
 }
 
 var headingRE = regexp.MustCompile(`^#+\s*`)
