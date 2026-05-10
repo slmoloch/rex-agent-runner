@@ -139,12 +139,13 @@ func (d *Daemon) callbackSubmitter() callback.Submitter {
 	})
 }
 
-// buildSystemPrompt concatenates workspace skills + the embedded rex prompt +
-// workspace AGENT.md, matching what claude_runner.py did at import time.
+// buildSystemPrompt concatenates the workspace skills index + the embedded rex
+// prompt + workspace AGENT.md. The skills index is just name/description/path
+// per skill — the agent reads the matching SKILL.md on demand.
 func buildSystemPrompt(ws workspace.Paths) (string, error) {
 	var parts []string
-	if combined, err := skills.LoadCombined(ws.SkillsDir); err == nil && combined != "" {
-		parts = append(parts, combined)
+	if index, err := skills.BuildPromptIndex(ws.SkillsDir); err == nil && index != "" {
+		parts = append(parts, index)
 	}
 	parts = append(parts, string(assets.RexSystemPrompt))
 	if data, err := os.ReadFile(ws.AgentMD); err == nil {
