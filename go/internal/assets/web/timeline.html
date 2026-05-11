@@ -343,6 +343,19 @@
     max-height: 240px;
     overflow-y: auto;
   }
+  .tool-row.thinking-turn {
+    background: #161122;
+    border-color: #3a2f5c;
+  }
+  .tool-row.thinking-turn .tool-name { color: #b392f0; }
+  .tool-row.thinking-turn .tool-input {
+    color: #a9a4b8;
+    font-style: italic;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    white-space: pre-wrap;
+    max-height: 240px;
+    overflow-y: auto;
+  }
   .tool-row.rex-user-tool {
     background: #0a2818;
     border-color: #2ea043;
@@ -912,6 +925,8 @@
     turns.forEach(function (turn) {
       if (turn && turn.type === 'text') {
         out += renderTextTurn(turn);
+      } else if (turn && turn.type === 'thinking') {
+        out += renderThinkingTurn(turn);
       } else {
         out += renderToolTurn(turn || {});
       }
@@ -931,6 +946,14 @@
     var text = turn.text == null ? '' : String(turn.text);
     return '<div class="tool-row text-turn">' +
       '<div class="tool-name">assistant</div>' +
+      '<div class="tool-input">' + esc(text) + '</div>' +
+      '</div>';
+  }
+
+  function renderThinkingTurn(turn) {
+    var text = turn.text == null ? '' : String(turn.text);
+    return '<div class="tool-row thinking-turn">' +
+      '<div class="tool-name">thinking</div>' +
       '<div class="tool-input">' + esc(text) + '</div>' +
       '</div>';
   }

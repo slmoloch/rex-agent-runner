@@ -126,6 +126,46 @@ func TestParseLine_TextTurnIsClipped(t *testing.T) {
 	}
 }
 
+// Thinking blocks are captured as their own turn type so the timeline can
+// show what the agent was reasoning about, not just what it ran. They share
+// the text clip cap because the intent is a record of activity, not a full
+// trace dump.
+func TestParseLine_ThinkingTurnIsCapturedAndClipped(t *testing.T) {
+	long := strings.Repeat("z", maxTextTurnChars*2)
+	line := mustMarshal(t, map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"content": []any{
+				map[string]any{"type": "thinking", "thinking": "short reasoning"},
+				map[string]any{"type": "text", "text": "answer"},
+				map[string]any{"type": "thinking", "thinking": long},
+			},
+		},
+	})
+
+	var s runState
+	parseLine(line, &s)
+
+	if len(s.turns) != 3 {
+		t.Fatalf("want 3 turns, got %d: %+v", len(s.turns), s.turns)
+	}
+	if s.turns[0].Type != "thinking" || s.turns[0].Text != "short reasoning" {
+		t.Fatalf("turn[0] = %+v", s.turns[0])
+	}
+	if s.turns[1].Type != "text" || s.turns[1].Text != "answer" {
+		t.Fatalf("turn[1] = %+v", s.turns[1])
+	}
+	if s.turns[2].Type != "thinking" {
+		t.Fatalf("turn[2] not thinking: %+v", s.turns[2])
+	}
+	if s.turns[2].Text == long {
+		t.Fatalf("long thinking was not clipped")
+	}
+	if !strings.HasSuffix(s.turns[2].Text, "…") {
+		t.Fatalf("clipped thinking should end with ellipsis")
+	}
+}
+
 func mustMarshal(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)

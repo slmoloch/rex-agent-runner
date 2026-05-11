@@ -23,20 +23,22 @@ type AssistantMessage struct {
 }
 
 type ContentBlock struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	Thinking string          `json:"thinking,omitempty"`
+	Name     string          `json:"name,omitempty"`
+	Input    json.RawMessage `json:"input,omitempty"`
 }
 
 // Turn is one entry in the chronological log of what Claude produced during a
-// run: either an assistant text message ("text") or a tool invocation ("tool").
-// Long string fields are clipped on construction so the entire structure is
-// always valid JSON when serialized — never a half-cut string.
+// run: an assistant text message ("text"), an extended-thinking trace
+// ("thinking"), or a tool invocation ("tool"). Long string fields are clipped
+// on construction so the entire structure is always valid JSON when
+// serialized — never a half-cut string.
 type Turn struct {
-	Type string `json:"type"` // "text" | "tool"
+	Type string `json:"type"` // "text" | "thinking" | "tool"
 
-	// type=="text"
+	// type=="text" | "thinking"
 	Text string `json:"text,omitempty"`
 
 	// type=="tool"
