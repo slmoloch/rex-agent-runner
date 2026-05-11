@@ -24,6 +24,23 @@ func (c *Client) SendMessage(ctx context.Context, text string) error {
 	return err
 }
 
+// SendMessageMarkdown posts a message with parse_mode=Markdown (Telegram's
+// legacy Markdown V1). If Telegram rejects the markup, retry once as plain
+// text so the user still receives the content instead of a hard error.
+func (c *Client) SendMessageMarkdown(ctx context.Context, text string) error {
+	v := url.Values{}
+	v.Set("chat_id", c.strChatID())
+	v.Set("text", text)
+	v.Set("parse_mode", "Markdown")
+	_, err := c.doJSON(ctx, "sendMessage", v)
+	if err != nil && isParseError(err) {
+		slog.Warn("telegram markdown rejected; resending as plain text", "err", err)
+		v.Del("parse_mode")
+		_, err = c.doJSON(ctx, "sendMessage", v)
+	}
+	return err
+}
+
 // SendMessageHTML posts a message with parse_mode=HTML. If Telegram rejects
 // the markup, retry once as plain text (with tags stripped and entities
 // unescaped) so the user still receives readable content instead of a hard
