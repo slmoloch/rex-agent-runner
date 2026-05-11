@@ -19,9 +19,17 @@ import (
 	"github.com/slmoloch/rex-agent-runner/internal/workspace"
 )
 
-const Usage = `Usage: rex user text <message>
-       rex user voice <message>
-       rex user file <path> [caption]`
+const Usage = `Usage: rex user text <message>            plain inline text message
+       rex user rich-text <message>       inline message with Telegram HTML formatting
+       rex user voice <message>           text-to-speech voice note
+       rex user file <path> [caption]     upload the file as a Telegram attachment
+
+Notes:
+  - 'text' sends the message verbatim with no markup interpretation.
+  - 'rich-text' interprets the message as Telegram HTML (<b>, <i>, <code>, <a>, ...).
+  - 'file' sends the file as a downloadable attachment only — its contents are NOT
+    shown inline. To deliver text content inline, read the file and pass it to
+    'user text' or 'user rich-text'.`
 
 // Run dispatches the user subcommand. Returns a non-nil error for failures;
 // special ExitUnavailable is returned when voice is configured-off (exit 2).
@@ -43,6 +51,15 @@ func Run(ctx context.Context, cfg *config.Config, ws workspace.Paths, args []str
 			return err
 		}
 		return logSend(ws, "text", map[string]any{"message": msg})
+	case "rich-text":
+		if len(args) < 2 {
+			return errors.New("rex user rich-text <message>")
+		}
+		msg := strings.Join(args[1:], " ")
+		if err := tg.SendMessageHTML(ctx, msg); err != nil {
+			return err
+		}
+		return logSend(ws, "rich-text", map[string]any{"message": msg})
 	case "voice":
 		if len(args) < 2 {
 			return errors.New("rex user voice <message>")

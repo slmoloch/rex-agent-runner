@@ -70,9 +70,10 @@ Callbacks:
   callback remove <id>
 
 User channel (called by agents):
-  user text <message>
-  user voice <message>
-  user file <path> [caption]
+  user text <message>             Plain inline text message (no markup)
+  user rich-text <message>        Inline message with Telegram HTML formatting
+  user voice <message>            Text-to-speech voice note
+  user file <path> [caption]      Upload <path> as a Telegram attachment (not inline)
 
 Other:
   version                          Show version, commit, and build info`
