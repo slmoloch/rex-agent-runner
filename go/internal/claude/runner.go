@@ -281,6 +281,13 @@ func parseLine(line []byte, s *runState) {
 				text := clipString(b.Text, maxTextTurnChars)
 				s.turns = append(s.turns, Turn{Type: "text", Text: text})
 				slog.Info("claude text", "preview", truncate(b.Text, 300))
+			case "thinking":
+				if b.Thinking == "" {
+					continue
+				}
+				text := clipString(b.Thinking, maxTextTurnChars)
+				s.turns = append(s.turns, Turn{Type: "thinking", Text: text})
+				slog.Info("claude thinking", "preview", truncate(b.Thinking, 300))
 			}
 		}
 	}
