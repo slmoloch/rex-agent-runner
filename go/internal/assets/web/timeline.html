@@ -362,6 +362,7 @@
     position: relative;
   }
   .tool-row.rex-user-tool .tool-name { color: #56d364; }
+  .tool-row.rex-user-tool .tool-cmd { border-left-color: #2ea043; }
   .tool-row.rex-user-tool .rex-user-tag {
     display: inline-block;
     font-size: 10px;
@@ -878,12 +879,6 @@
         '<div class="sid-mono">' + esc(ev.session_id) + '</div></div>';
     }
 
-    if (hasRexUser(ev)) {
-      html += '<div class="modal-section">' +
-        '<div class="modal-label">Sent to user (' + ev.rex_user_sends.length + ')</div>' +
-        renderRexUserSends(ev.rex_user_sends) + '</div>';
-    }
-
     if (ev.prompt_preview) {
       html += '<div class="modal-section">' +
         '<div class="modal-label">Prompt</div>' +
@@ -936,10 +931,23 @@
   }
 
   function renderToolTurn(tool) {
-    return '<div class="tool-row">' +
+    var cls = 'tool-row';
+    if (isRexCommand(tool)) cls += ' rex-user-tool';
+    return '<div class="' + cls + '">' +
       '<div class="tool-name">' + esc(tool.name || '?') + '</div>' +
       renderToolInput(tool.name, tool.input) +
       '</div>';
+  }
+
+  function isRexCommand(tool) {
+    if (!tool || tool.name !== 'Bash') return false;
+    var input = tool.input;
+    if (typeof input === 'string') {
+      try { input = JSON.parse(input); } catch (e) { return false; }
+    }
+    if (!input || typeof input !== 'object') return false;
+    var cmd = String(input.command || '').replace(/^\s+/, '');
+    return /^rex(\s|$)/.test(cmd);
   }
 
   function renderTextTurn(turn) {
@@ -1115,26 +1123,6 @@
       if (v.length > 400) v = v.slice(0, 400) + '…';
       out += field(k, v);
     });
-    return out;
-  }
-
-  function renderRexUserSends(sends) {
-    var out = '<div class="tool-list">';
-    sends.forEach(function (s) {
-      var body = '';
-      if (s.mode === 'file') {
-        body = (s.path || '') + (s.caption ? '\n' + s.caption : '');
-      } else {
-        body = s.message || '';
-      }
-      out += '<div class="tool-row rex-user-tool">' +
-        '<div class="tool-name">&rarr; user' +
-          '<span class="rex-user-tag">' + esc(s.mode || '?') + '</span>' +
-        '</div>' +
-        (body ? '<div class="tool-input">' + esc(body) + '</div>' : '') +
-        '</div>';
-    });
-    out += '</div>';
     return out;
   }
 
