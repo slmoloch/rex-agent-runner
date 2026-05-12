@@ -10,15 +10,16 @@ import (
 	"github.com/slmoloch/rex-agent-runner/internal/session"
 )
 
-// ReplyMarker is the sentinel the agent emits as its final turn text after
-// delivering a reply via `rex user`. When present, the daemon suppresses the
-// fallback that would otherwise forward the final text to the user.
-const ReplyMarker = "used_rex_to_reply"
+// NoReplyMarker is the sentinel the agent emits as its final turn text to
+// tell the daemon not to forward anything to the user. Use it after already
+// delivering a reply via `rex user`, or in callbacks/jobs that don't need
+// to say anything to the user.
+const NoReplyMarker = "NO_REPLY"
 
 // runInSession runs one Claude turn for the given session target, persists
 // the event, and returns the response text along with a flag telling the
-// caller whether the turn already delivered a reply via `rex user` (in
-// which case the response text should not be forwarded to the user).
+// caller whether to suppress forwarding the response to the user (set when
+// the agent emitted NoReplyMarker in its final text).
 func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigger, callerSession string) (string, bool) {
 	sessionID := d.sessions.Resolve(sessionTarget)
 
@@ -54,10 +55,10 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 		d.sessions.Register(newID, name)
 	}
 
-	usedRexUser := strings.Contains(result.Response, ReplyMarker)
+	suppressReply := strings.Contains(result.Response, NoReplyMarker)
 	response := result.Response
-	if usedRexUser {
-		response = strings.TrimSpace(strings.ReplaceAll(response, ReplyMarker, ""))
+	if suppressReply {
+		response = strings.TrimSpace(strings.ReplaceAll(response, NoReplyMarker, ""))
 	}
 
 	ev := events.Event{
@@ -76,7 +77,7 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 		slog.Error("events append", "err", err)
 	}
 
-	return response, usedRexUser
+	return response, suppressReply
 }
 
 // RunJob matches server.JobFunc. It injects caller-session context into the
