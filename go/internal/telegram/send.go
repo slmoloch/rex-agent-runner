@@ -43,6 +43,25 @@ func (c *Client) SendMessageHTML(ctx context.Context, text string) error {
 	return err
 }
 
+// SendMessageMarkdown posts a message with parse_mode=Markdown (legacy V1).
+// Used for the default text channel and for forwarded Claude turn text so
+// asterisks, underscores, backticks, and links render the way users expect
+// from LLM output. On parse rejection, retries once without parse_mode so
+// malformed markup degrades to verbatim text instead of erroring out.
+func (c *Client) SendMessageMarkdown(ctx context.Context, text string) error {
+	v := url.Values{}
+	v.Set("chat_id", c.strChatID())
+	v.Set("text", text)
+	v.Set("parse_mode", "Markdown")
+	_, err := c.doJSON(ctx, "sendMessage", v)
+	if err != nil && isParseError(err) {
+		slog.Warn("telegram markdown rejected; resending as plain text", "err", err)
+		v.Del("parse_mode")
+		_, err = c.doJSON(ctx, "sendMessage", v)
+	}
+	return err
+}
+
 // isParseError returns true for Telegram errors caused by malformed
 // parse_mode markup, which we recover from by resending without parse_mode.
 func isParseError(err error) bool {
@@ -69,19 +88,21 @@ func stripHTMLFormatting(s string) string {
 	return html.UnescapeString(s)
 }
 
-// SendMessageChunks splits text at 4096 chars (Telegram's hard limit) and
-// sends each piece sequentially. Mirrors rex_bot.py's _send_response.
-func (c *Client) SendMessageChunks(ctx context.Context, text string) error {
+// SendMessageMarkdownChunks splits text at 4096 chars (Telegram's hard
+// limit) and sends each piece sequentially with parse_mode=Markdown (V1).
+// Used for forwarded Claude turn text, which routinely contains *bold*,
+// _italics_, `code`, and [links](…) the user expects to render.
+func (c *Client) SendMessageMarkdownChunks(ctx context.Context, text string) error {
 	const max = 4096
 	if len(text) <= max {
-		return c.SendMessage(ctx, text)
+		return c.SendMessageMarkdown(ctx, text)
 	}
 	for i := 0; i < len(text); i += max {
 		end := i + max
 		if end > len(text) {
 			end = len(text)
 		}
-		if err := c.SendMessage(ctx, text[i:end]); err != nil {
+		if err := c.SendMessageMarkdown(ctx, text[i:end]); err != nil {
 			return err
 		}
 	}

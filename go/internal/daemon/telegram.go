@@ -132,7 +132,7 @@ func (d *Daemon) handleText(ctx context.Context, m *telegram.Message) {
 		slog.Warn("claude produced empty response; sending fallback", "trigger", "telegram")
 		resp = emptyResponseFallback
 	}
-	if err := d.tg.SendMessageChunks(ctx, resp); err != nil {
+	if err := d.tg.SendMessageMarkdownChunks(ctx, resp); err != nil {
 		slog.Error("send message failed", "err", err)
 	}
 }
@@ -204,12 +204,12 @@ func (d *Daemon) handleVoice(ctx context.Context, m *telegram.Message) {
 	replyPath := filepath.Join(d.ws.Inbox, fmt.Sprintf("%s-reply-%s.ogg", ts, m.Voice.FileUniqueID))
 	if err := d.voice.Synthesize(ctx, resp, replyPath); err != nil {
 		slog.Error("synth failed, falling back to text", "err", err)
-		_ = d.tg.SendMessageChunks(ctx, resp)
+		_ = d.tg.SendMessageMarkdownChunks(ctx, resp)
 		return
 	}
 	if err := d.tg.SendVoice(ctx, replyPath); err != nil {
 		slog.Error("send voice failed", "err", err)
-		_ = d.tg.SendMessageChunks(ctx, resp)
+		_ = d.tg.SendMessageMarkdownChunks(ctx, resp)
 	}
 }
 
@@ -299,7 +299,7 @@ func (d *Daemon) handleFile(ctx context.Context, m *telegram.Message, a attached
 		slog.Warn("claude produced empty response; sending fallback", "trigger", "telegram-file")
 		resp = emptyResponseFallback
 	}
-	if err := d.tg.SendMessageChunks(ctx, resp); err != nil {
+	if err := d.tg.SendMessageMarkdownChunks(ctx, resp); err != nil {
 		slog.Error("send message failed", "err", err)
 	}
 }

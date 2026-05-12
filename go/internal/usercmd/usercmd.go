@@ -15,13 +15,13 @@ import (
 	"github.com/slmoloch/rex-agent-runner/internal/workspace"
 )
 
-const Usage = `Usage: rex user text <message>            plain inline text message
+const Usage = `Usage: rex user text <message>            inline message with Telegram Markdown (V1) formatting
        rex user rich-text <message>       inline message with Telegram HTML formatting
        rex user voice <message>           text-to-speech voice note
        rex user file <path> [caption]     upload the file as a Telegram attachment
 
 Notes:
-  - 'text' sends the message verbatim with no markup interpretation.
+  - 'text' interprets the message as Telegram Markdown V1 (*bold*, _italic_, ` + "`code`" + `, [link](url)).
   - 'rich-text' interprets the message as Telegram HTML (<b>, <i>, <code>, <a>, ...).
   - 'file' sends the file as a downloadable attachment only — its contents are NOT
     shown inline. To deliver text content inline, read the file and pass it to
@@ -42,7 +42,7 @@ func Run(ctx context.Context, cfg *config.Config, _ workspace.Paths, args []stri
 		if len(args) < 2 {
 			return errors.New("rex user text <message>")
 		}
-		return tg.SendMessage(ctx, strings.Join(args[1:], " "))
+		return tg.SendMessageMarkdown(ctx, strings.Join(args[1:], " "))
 	case "rich-text":
 		if len(args) < 2 {
 			return errors.New("rex user rich-text <message>")
