@@ -3,17 +3,23 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/slmoloch/rex-agent-runner/internal/claude"
 	"github.com/slmoloch/rex-agent-runner/internal/events"
 	"github.com/slmoloch/rex-agent-runner/internal/session"
 )
 
-// runInSession is the Go port of rex_bot.py:_run_in_session. It runs one
-// Claude turn for the given session target, persists the event, and returns
-// the response text along with a flag telling the caller whether the turn
-// already delivered a reply via `rex user` (so the fallback text reply
-// should be suppressed).
+// NoReplyMarker is the sentinel the agent emits as its final turn text to
+// tell the daemon not to forward anything to the user. Use it after already
+// delivering a reply via `rex user`, or in callbacks/jobs that don't need
+// to say anything to the user.
+const NoReplyMarker = "NO_REPLY"
+
+// runInSession runs one Claude turn for the given session target, persists
+// the event, and returns the response text along with a flag telling the
+// caller whether to suppress forwarding the response to the user (set when
+// the agent emitted NoReplyMarker in its final text).
 func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigger, callerSession string) (string, bool) {
 	sessionID := d.sessions.Resolve(sessionTarget)
 
@@ -49,15 +55,10 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 		d.sessions.Register(newID, name)
 	}
 
-	usedRexUser := len(result.RexUserSends) > 0
-	if usedRexUser {
-		modes := make([]string, 0, len(result.RexUserSends))
-		for _, s := range result.RexUserSends {
-			if m, ok := s["mode"].(string); ok {
-				modes = append(modes, m)
-			}
-		}
-		slog.Info("rex user delivered", "count", len(result.RexUserSends), "modes", modes)
+	suppressReply := strings.Contains(result.Response, NoReplyMarker)
+	response := result.Response
+	if suppressReply {
+		response = strings.TrimSpace(strings.ReplaceAll(response, NoReplyMarker, ""))
 	}
 
 	ev := events.Event{
@@ -65,21 +66,18 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 		SessionID:       newID,
 		Trigger:         trigger,
 		PromptPreview:   truncate(prompt, 200),
-		ResponsePreview: truncate(result.Response, 500),
+		ResponsePreview: truncate(response, 500),
 		CostUSD:         result.CostUSD,
 		DurationMS:      int(result.Duration.Milliseconds()),
 		NumTurns:        result.NumTurns,
 		CallerSession:   callerSession,
 		Turns:           result.Turns,
 	}
-	if usedRexUser {
-		ev.RexUserSends = result.RexUserSends
-	}
 	if err := d.events.Append(ev); err != nil {
 		slog.Error("events append", "err", err)
 	}
 
-	return result.Response, usedRexUser
+	return response, suppressReply
 }
 
 // RunJob matches server.JobFunc. It injects caller-session context into the

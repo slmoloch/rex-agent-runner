@@ -31,7 +31,6 @@ func ingest(stmt *sql.Stmt, r io.Reader) (int, error) {
 			turnsVal = legacyToolsToTurns(raw["tools"])
 		}
 		turns, _ := encodeJSON(turnsVal)
-		sends, _ := encodeJSON(raw["rex_user_sends"])
 		if _, err := stmt.Exec(
 			asStr(raw["timestamp"]),
 			asStr(raw["session"]),
@@ -44,7 +43,6 @@ func ingest(stmt *sql.Stmt, r io.Reader) (int, error) {
 			asInt(raw["num_turns"]),
 			asStr(raw["caller_session"]),
 			turns,
-			sends,
 		); err != nil {
 			return count, err
 		}

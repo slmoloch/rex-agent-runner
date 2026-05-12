@@ -40,15 +40,14 @@ CREATE TABLE IF NOT EXISTS events (
     duration_ms INTEGER,
     num_turns INTEGER,
     caller_session TEXT,
-    turns TEXT,
-    rex_user_sends TEXT
+    turns TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_sid ON events(session_id);
 `
 
-// Row mirrors the events table. Turns/RexUserSends are stored as JSON text
-// and decoded on read so callers get native types.
+// Row mirrors the events table. Turns is stored as JSON text and decoded
+// on read so callers get native types.
 type Row struct {
 	Timestamp       string  `json:"timestamp"`
 	Session         string  `json:"session,omitempty"`
@@ -61,7 +60,6 @@ type Row struct {
 	NumTurns        int     `json:"num_turns,omitempty"`
 	CallerSession   string  `json:"caller_session,omitempty"`
 	Turns           any     `json:"turns,omitempty"`
-	RexUserSends    any     `json:"rex_user_sends,omitempty"`
 }
 
 type Store struct {
@@ -152,21 +150,17 @@ func (s *Store) Insert(r Row) error {
 	if err != nil {
 		return err
 	}
-	sends, err := encodeJSON(r.RexUserSends)
-	if err != nil {
-		return err
-	}
 	_, err = s.db.Exec(`
 		INSERT INTO events (
 			timestamp, session, session_id, trigger,
 			prompt_preview, response_preview,
 			cost_usd, duration_ms, num_turns, caller_session,
-			turns, rex_user_sends
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			turns
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.Timestamp, r.Session, r.SessionID, r.Trigger,
 		r.PromptPreview, r.ResponsePreview,
 		r.CostUSD, r.DurationMS, r.NumTurns, r.CallerSession,
-		turns, sends,
+		turns,
 	)
 	return err
 }
@@ -183,7 +177,7 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 			`SELECT timestamp, session, session_id, trigger,
 			        prompt_preview, response_preview,
 			        cost_usd, duration_ms, num_turns, caller_session,
-			        turns, rex_user_sends
+			        turns
 			 FROM events WHERE timestamp > ?
 			 ORDER BY timestamp DESC`, since)
 	} else {
@@ -192,7 +186,7 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 			`SELECT timestamp, session, session_id, trigger,
 			        prompt_preview, response_preview,
 			        cost_usd, duration_ms, num_turns, caller_session,
-			        turns, rex_user_sends
+			        turns
 			 FROM events WHERE timestamp >= ?
 			 ORDER BY timestamp DESC`, cutoff)
 	}
@@ -204,19 +198,18 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 	var out []Row
 	for rows.Next() {
 		var (
-			r            Row
-			turns, sends sql.NullString
+			r     Row
+			turns sql.NullString
 		)
 		if err := rows.Scan(
 			&r.Timestamp, &r.Session, &r.SessionID, &r.Trigger,
 			&r.PromptPreview, &r.ResponsePreview,
 			&r.CostUSD, &r.DurationMS, &r.NumTurns, &r.CallerSession,
-			&turns, &sends,
+			&turns,
 		); err != nil {
 			return nil, err
 		}
 		r.Turns = decodeJSON(turns)
-		r.RexUserSends = decodeJSON(sends)
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -296,8 +289,8 @@ func (s *Store) Rebuild(paths []string) (int, error) {
 			timestamp, session, session_id, trigger,
 			prompt_preview, response_preview,
 			cost_usd, duration_ms, num_turns, caller_session,
-			turns, rex_user_sends
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+			turns
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return 0, err
 	}

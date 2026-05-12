@@ -364,7 +364,7 @@ func runSession(ctx context.Context, args []string) error {
 		mainID := seStore.GetMainID()
 		if mainID != "" {
 			fmt.Println("Preparing session for reset…")
-			runner := &claude.Runner{Bin: claude.FindBin(cfg.ClaudeBin), Workdir: ws.Root, TurnMarkerDir: ws.TurnMarkerDir}
+			runner := &claude.Runner{Bin: claude.FindBin(cfg.ClaudeBin), Workdir: ws.Root}
 			cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 			defer cancel()
 			if _, err := runner.Run(cctx, claude.Options{

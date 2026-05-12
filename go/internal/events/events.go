@@ -32,7 +32,6 @@ type Event struct {
 	NumTurns        int     `json:"num_turns,omitempty"`
 	CallerSession   string  `json:"caller_session,omitempty"`
 	Turns           any     `json:"turns,omitempty"`
-	RexUserSends    any     `json:"rex_user_sends,omitempty"`
 }
 
 type Store struct {
@@ -95,7 +94,6 @@ func timelineRow(e Event) timeline.Row {
 		NumTurns:        e.NumTurns,
 		CallerSession:   e.CallerSession,
 		Turns:           e.Turns,
-		RexUserSends:    e.RexUserSends,
 	}
 }
 

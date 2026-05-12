@@ -9,7 +9,6 @@ import (
 type Paths struct {
 	Root          string // absolute workspace path
 	Rex           string // <root>/.rex
-	TurnMarkerDir string // <root>/.rex/turn-markers
 	Inbox         string // <root>/inbox
 	EventsDir     string // <root>/events  (hourly JSONL)
 	LegacyEvents  string // <root>/events.jsonl (pre-rotation events)
@@ -25,7 +24,6 @@ func New(root string) Paths {
 	return Paths{
 		Root:          root,
 		Rex:           filepath.Join(root, ".rex"),
-		TurnMarkerDir: filepath.Join(root, ".rex", "turn-markers"),
 		Inbox:         filepath.Join(root, "inbox"),
 		EventsDir:     filepath.Join(root, "events"),
 		LegacyEvents:  filepath.Join(root, "events.jsonl"),
@@ -39,7 +37,7 @@ func New(root string) Paths {
 
 // EnsureDirs creates the directories that rex assumes exist at runtime.
 func (p Paths) EnsureDirs() error {
-	for _, d := range []string{p.Root, p.Rex, p.TurnMarkerDir, p.EventsDir, p.Inbox} {
+	for _, d := range []string{p.Root, p.Rex, p.EventsDir, p.Inbox} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
 		}

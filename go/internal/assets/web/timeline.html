@@ -376,18 +376,6 @@
     letter-spacing: 0.5px;
     vertical-align: middle;
   }
-  .tt-rex-user {
-    display: inline-block;
-    font-size: 10px;
-    font-weight: 700;
-    color: #0a2818;
-    background: #56d364;
-    padding: 1px 5px;
-    border-radius: 6px;
-    margin-left: 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-  }
   .sid-mono {
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-size: 11px;
@@ -470,12 +458,6 @@
     if (trigger.startsWith('callback')) return COLORS.callback;
     if (trigger.startsWith('send')) return COLORS.send;
     return DEFAULT_COLOR;
-  }
-
-  var REX_USER_COLOR = '#56d364';
-
-  function hasRexUser(ev) {
-    return !!(ev && ev.rex_user_sends && ev.rex_user_sends.length);
   }
 
   // --- state ---
@@ -621,9 +603,6 @@
     svg.selectAll('.ev-dot')
       .attr('cx', function (d) { return nx(d.t0); });
 
-    svg.selectAll('.rex-user-marker')
-      .attr('cx', function (d) { return nx(d.t0); });
-
     svg.selectAll('.conn-path')
       .attr('d', function (d) { return connPath(nx(d.t), d.y1, d.y2); });
 
@@ -749,7 +728,6 @@
       s.events.forEach(function (d) {
         var color = tColor(d.ev.trigger);
         var hasDur = d.ev.duration_ms > 0;
-        var rexUser = hasRexUser(d.ev);
         if (hasDur) {
           evG.append('rect')
             .datum(d)
@@ -757,9 +735,9 @@
             .attr('x', xScale(d.t0)).attr('y', blockY + 3)
             .attr('width', Math.max(MIN_EVENT_W, xScale(d.t1) - xScale(d.t0)))
             .attr('height', BLOCK_H - 6).attr('rx', 3)
-            .attr('fill', color).attr('fill-opacity', rexUser ? 0.5 : 0.65)
-            .attr('stroke', rexUser ? REX_USER_COLOR : color)
-            .attr('stroke-width', rexUser ? 1.75 : 1)
+            .attr('fill', color).attr('fill-opacity', 0.65)
+            .attr('stroke', color)
+            .attr('stroke-width', 1)
             .style('cursor', 'pointer')
             .on('mouseover', function (event) { showTip(event, d.ev); })
             .on('mousemove', moveTip)
@@ -771,25 +749,13 @@
             .attr('class', 'ev-dot')
             .attr('cx', xScale(d.t0)).attr('cy', laneY + LANE_H / 2)
             .attr('r', 5).attr('fill', color)
-            .attr('stroke', rexUser ? REX_USER_COLOR : '#0d1117')
-            .attr('stroke-width', rexUser ? 2 : 1.5)
+            .attr('stroke', '#0d1117')
+            .attr('stroke-width', 1.5)
             .style('cursor', 'pointer')
             .on('mouseover', function (event) { showTip(event, d.ev); })
             .on('mousemove', moveTip)
             .on('mouseout', hideTip)
             .on('click', function (event) { event.stopPropagation(); hideTip(); openModal(d.ev); });
-        }
-        if (rexUser) {
-          evG.append('circle')
-            .datum(d)
-            .attr('class', 'rex-user-marker')
-            .attr('cx', xScale(d.t0))
-            .attr('cy', blockY - 2)
-            .attr('r', 4)
-            .attr('fill', REX_USER_COLOR)
-            .attr('stroke', '#0d1117')
-            .attr('stroke-width', 1.25)
-            .style('pointer-events', 'none');
         }
       });
     });
@@ -830,9 +796,8 @@
     var t = new Date(ev.timestamp);
     var dur = ev.duration_ms ? fmtDur(ev.duration_ms) : '-';
     var cost = ev.cost_usd != null ? '$' + ev.cost_usd.toFixed(4) : '-';
-    var rexTag = hasRexUser(ev) ? ' <span class="tt-rex-user">&rarr; user (' + ev.rex_user_sends.length + ')</span>' : '';
     el.innerHTML =
-      '<div class="tt-row"><strong>' + esc(ev.trigger || '?') + '</strong> &rarr; ' + esc(ev.session || '') + rexTag + '</div>' +
+      '<div class="tt-row"><strong>' + esc(ev.trigger || '?') + '</strong> &rarr; ' + esc(ev.session || '') + '</div>' +
       '<div class="tt-row tt-dim">' + t.toLocaleString() + '</div>' +
       '<div class="tt-row tt-dim">' + dur + ' &middot; ' + cost + ' &middot; ' + (ev.num_turns || 0) + ' turns</div>' +
       (ev.prompt_preview ? '<div class="tt-prompt">' + esc(ev.prompt_preview) + '</div>' : '');

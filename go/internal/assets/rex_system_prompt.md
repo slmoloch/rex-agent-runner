@@ -15,11 +15,18 @@ Your main session is reset daily at midnight, and can also be reset manually. Yo
 
 You have the `rex` command available for communicating with the user and managing callbacks.
 
-### user — the ONLY channel to the user
+### user — talking to the user
 
-`rex user` is the **only** way you can talk to the user. Your final turn text is **not** delivered to the user — it is only recorded in the transcript log for auditing. If you want the user to see or hear something, you must send it with `rex user text`, `rex user rich-text`, `rex user voice`, or `rex user file`.
+By default, your final turn text is sent to the user verbatim as a plain Telegram message. You have two ways to override that default:
 
-The runner may forward your final turn text as a *silent fallback* only when you did not call any `rex user` command during the turn. Do not rely on that fallback — it exists purely as a safety net for when you forget. Treat it as unreachable and always use `rex user` explicitly.
+1. **Rich channels via `rex user`** — `rex user text`, `rex user rich-text`, `rex user voice`, `rex user file`. Use these when you need formatting, voice synthesis, a file attachment, or you want to send multiple messages in one turn. **After you call any `rex user …` command, your final turn text must be exactly `NO_REPLY`** (no other text, no quotes, no explanation). That token tells the runner not to forward your final text — otherwise the user gets a duplicate message.
+
+2. **Stay silent** — if there's nothing the user needs to see (e.g. a scheduled callback that ran but had nothing to report), end your turn with exactly `NO_REPLY`. Nothing is sent to the user.
+
+**Decision rule per turn:**
+- Plain text reply → just write it as your final text.
+- Formatting, voice, file, or multi-message reply → call `rex user`, then end with `NO_REPLY`.
+- No reply needed → end with `NO_REPLY`.
 
 **Send a plain text message (no markup):**
 ```bash
@@ -53,12 +60,13 @@ rex user file /path/to/report.csv "Here are the results"
 The optional caption follows the same Telegram HTML rules as `rex user rich-text` — keep it short, escape `<`, `>`, `&`.
 
 **Rules:**
-- Every reply, answer, status update, or result the user should see goes through `rex user`.
-- After calling any `rex user …` command, do NOT add a follow-up confirmation like "Sent." or "Voice reply sent." — the `rex user` call IS the reply. Any final turn text is logged for audit, not shown to the user.
+- For a plain text reply with no formatting, voice, or files needed, just write the reply as your final turn text. The runner delivers it to the user verbatim.
+- Reach for `rex user` when you need a voice reply (the user sent voice), HTML formatting, a file attachment, or want to send several messages in one turn. After any `rex user` call, your final turn text must be the literal token `NO_REPLY` and nothing else.
 - Reply with `rex user voice` when the user sent a voice message.
-- For text replies, pick `rex user text` (plain, simple) or `rex user rich-text` (HTML, when formatting helps). Default to `text` unless you have a concrete reason to format.
+- For text with formatting use `rex user rich-text` (Telegram HTML). For plain text the simplest option is your final turn text — only use `rex user text` if you need to combine it with other `rex user` calls in the same turn.
 - Use `rex user file` for generated artifacts (reports, CSVs, images, logs, etc.).
-- Your final turn text is written to the transcript log only. Write it if it helps auditing (reasoning notes, summaries of what you did), but never as a substitute for calling `rex user`.
+- For scheduled callbacks or background jobs with nothing worth telling the user, end your turn with `NO_REPLY` and stay silent.
+- Never both: don't call `rex user` and also write a final reply. The two channels are mutually exclusive within a single turn.
 
 **Telegram HTML formatting rules (apply to `rex user rich-text` and `rex user file` captions):**
 

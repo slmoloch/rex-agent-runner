@@ -28,12 +28,11 @@ type Config struct {
 // Paths groups the resolved filesystem locations derived from a Config.
 // Kept separate from Config so the on-disk JSON stays minimal.
 type Paths struct {
-	ProjectDir     string // where config.json lives
-	Workspace      string // absolute
-	RexDir         string // <workspace>/.rex
-	TurnMarkerDir  string // <workspace>/.rex/turn-markers
-	InstallDir     string // dir of the rex binary / assets
-	ConfigFile     string
+	ProjectDir string // where config.json lives
+	Workspace  string // absolute
+	RexDir     string // <workspace>/.rex
+	InstallDir string // dir of the rex binary / assets
+	ConfigFile string
 }
 
 // ProjectDir returns the directory holding config.json.
@@ -93,13 +92,11 @@ func (c *Config) ResolvePaths(installDir string) (Paths, error) {
 	if err != nil {
 		return Paths{}, err
 	}
-	rex := filepath.Join(abs, ".rex")
 	return Paths{
-		ProjectDir:    c.projectDir,
-		Workspace:     abs,
-		RexDir:        rex,
-		TurnMarkerDir: filepath.Join(rex, "turn-markers"),
-		InstallDir:    installDir,
-		ConfigFile:    filepath.Join(c.projectDir, "config.json"),
+		ProjectDir: c.projectDir,
+		Workspace:  abs,
+		RexDir:     filepath.Join(abs, ".rex"),
+		InstallDir: installDir,
+		ConfigFile: filepath.Join(c.projectDir, "config.json"),
 	}, nil
 }
