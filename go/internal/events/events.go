@@ -32,6 +32,18 @@ type Event struct {
 	NumTurns        int     `json:"num_turns,omitempty"`
 	CallerSession   string  `json:"caller_session,omitempty"`
 	Turns           any     `json:"turns,omitempty"`
+	ReplySent       bool    `json:"reply_sent,omitempty"`
+	Replies         []Reply `json:"replies,omitempty"`
+}
+
+// Reply is one piece of communication the daemon actually delivered to the
+// user during a turn. It's derived from the run (rex user invocations and/or
+// the final response) and persisted alongside the raw turns so the UI can
+// display the user-facing transcript without re-parsing the trace.
+type Reply struct {
+	Kind      string `json:"kind"`              // "text" | "rich-text" | "voice" | "file" | "final"
+	Content   string `json:"content,omitempty"` // delivered text, or file path for kind="file"
+	TurnIndex int    `json:"turn_index"`        // index into Turns that produced this reply
 }
 
 type Store struct {
@@ -82,6 +94,14 @@ func (s *Store) Append(e Event) error {
 }
 
 func timelineRow(e Event) timeline.Row {
+	replies := make([]timeline.Reply, len(e.Replies))
+	for i, r := range e.Replies {
+		replies[i] = timeline.Reply{
+			Kind:      r.Kind,
+			Content:   r.Content,
+			TurnIndex: r.TurnIndex,
+		}
+	}
 	return timeline.Row{
 		Timestamp:       e.Timestamp,
 		Session:         e.Session,
@@ -94,6 +114,8 @@ func timelineRow(e Event) timeline.Row {
 		NumTurns:        e.NumTurns,
 		CallerSession:   e.CallerSession,
 		Turns:           e.Turns,
+		ReplySent:       e.ReplySent,
+		Replies:         replies,
 	}
 }
 

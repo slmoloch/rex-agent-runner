@@ -31,6 +31,10 @@ func ingest(stmt *sql.Stmt, r io.Reader) (int, error) {
 			turnsVal = legacyToolsToTurns(raw["tools"])
 		}
 		turns, _ := encodeJSON(turnsVal)
+		var repliesEncoded any
+		if v, ok := raw["replies"]; ok && v != nil {
+			repliesEncoded, _ = encodeJSON(v)
+		}
 		if _, err := stmt.Exec(
 			asStr(raw["timestamp"]),
 			asStr(raw["session"]),
@@ -43,6 +47,8 @@ func ingest(stmt *sql.Stmt, r io.Reader) (int, error) {
 			asInt(raw["num_turns"]),
 			asStr(raw["caller_session"]),
 			turns,
+			boolAsInt(raw["reply_sent"]),
+			repliesEncoded,
 		); err != nil {
 			return count, err
 		}
@@ -67,6 +73,14 @@ func asFloat(v any) float64 {
 		return float64(n)
 	case int64:
 		return float64(n)
+	}
+	return 0
+}
+
+func boolAsInt(v any) int {
+	b, _ := v.(bool)
+	if b {
+		return 1
 	}
 	return 0
 }

@@ -348,6 +348,57 @@
     border-color: #2ea043;
   }
   .tool-row.text-turn.user-message .tool-name { color: #56d364; }
+  .to-user-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    color: #0a2818;
+    background: #56d364;
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    vertical-align: middle;
+  }
+  .reply-row {
+    background: #0a2818;
+    border: 1px solid #2ea043;
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+  .reply-row .reply-kind {
+    font-size: 11px;
+    font-weight: 700;
+    color: #56d364;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+  }
+  .reply-row .reply-turn-ref {
+    font-size: 10px;
+    color: #6e7681;
+    margin-left: 8px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+  }
+  .reply-row .reply-content {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #c9d1d9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    white-space: pre-wrap;
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  .reply-empty {
+    background: #1c0f12;
+    border: 1px dashed #6e7681;
+    color: #8b949e;
+    font-size: 11px;
+    font-style: italic;
+    padding: 8px 10px;
+    border-radius: 6px;
+  }
   .tool-row.thinking-turn {
     background: #161122;
     border-color: #3a2f5c;
@@ -368,19 +419,6 @@
   }
   .tool-row.rex-user-tool .tool-name { color: #56d364; }
   .tool-row.rex-user-tool .tool-cmd { border-left-color: #2ea043; }
-  .tool-row.rex-user-tool .rex-user-tag {
-    display: inline-block;
-    font-size: 10px;
-    font-weight: 700;
-    color: #0a2818;
-    background: #56d364;
-    padding: 1px 6px;
-    border-radius: 8px;
-    margin-left: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    vertical-align: middle;
-  }
   .sid-mono {
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-size: 11px;
@@ -399,7 +437,7 @@
     <div class="legend-item"><div class="legend-swatch" style="background:#bc8cff"></div>dispatch</div>
     <div class="legend-item"><div class="legend-swatch" style="background:#f85149"></div>gc</div>
     <div class="legend-item"><div class="legend-swatch" style="background:#58a6ff"></div>reset</div>
-    <div class="legend-item"><div class="legend-swatch" style="background:#56d364;border-radius:50%"></div>&rarr; rex user</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#56d364;border-radius:50%"></div>&rarr; user (sent reply)</div>
   </div>
   <nav><a href="/callbacks">Callbacks</a></nav>
 </header>
@@ -856,9 +894,15 @@
     }
 
     var turns = normalizeTurns(ev);
+    var replies = normalizeReplies(ev, turns);
+
+    html += '<div class="modal-section">' +
+      '<div class="modal-label">Replies to user (' + replies.length + ')</div>' +
+      renderReplies(replies) + '</div>';
+
     html += '<div class="modal-section">' +
       '<div class="modal-label">Turns (' + turns.length + ')</div>' +
-      renderTurns(turns) + '</div>';
+      renderTurns(turns, replies) + '</div>';
 
     body.innerHTML = html;
     backdrop.classList.add('visible');
@@ -877,36 +921,112 @@
     return [];
   }
 
-  function renderTurns(turns) {
+  // normalizeReplies returns the user-facing replies recorded for an event.
+  // Prefers the backend-supplied `replies` field; for older rows without it,
+  // falls back to deriving them from the turns (rex user calls + final text
+  // when not suppressed) so the UI stays useful against historical data.
+  function normalizeReplies(ev, turns) {
+    if (Array.isArray(ev.replies)) return ev.replies;
+    var out = [];
+    var hasRexUser = false;
+    turns.forEach(function (t, i) {
+      if (isRexCommand(t)) {
+        hasRexUser = true;
+        var parsed = parseRexUserCommand(t);
+        out.push({
+          kind: parsed.kind || 'text',
+          content: parsed.content || '',
+          turn_index: i,
+        });
+      }
+    });
+    if (!hasRexUser) {
+      for (var j = turns.length - 1; j >= 0; j--) {
+        if (turns[j] && turns[j].type === 'text') {
+          var text = String(turns[j].text || '');
+          if (!/\bNO_REPLY\b/.test(text) && text.trim() !== '') {
+            out.push({ kind: 'final', content: text, turn_index: j });
+          }
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
+  function parseRexUserCommand(turn) {
+    var input = turn && turn.input;
+    if (typeof input === 'string') {
+      try { input = JSON.parse(input); } catch (e) { return {}; }
+    }
+    if (!input || typeof input !== 'object') return {};
+    var cmd = String(input.command || '');
+    var m = cmd.match(/rex user (\S+)\s*([\s\S]*)$/);
+    if (!m) return {};
+    var content = (m[2] || '').trim();
+    if (content.length >= 2) {
+      var f = content.charAt(0), l = content.charAt(content.length - 1);
+      if (f === l && (f === '"' || f === "'")) {
+        content = content.slice(1, -1);
+      }
+    }
+    return { kind: m[1], content: content };
+  }
+
+  function renderReplies(replies) {
+    if (!replies.length) {
+      return '<div class="reply-empty">No communication delivered to the user during this turn.</div>';
+    }
+    var out = '<div class="tool-list">';
+    replies.forEach(function (r) {
+      var kind = r && r.kind ? String(r.kind) : 'text';
+      var content = r && r.content != null ? String(r.content) : '';
+      var ref = (r && typeof r.turn_index === 'number' && r.turn_index >= 0)
+        ? '<span class="reply-turn-ref">turn #' + (r.turn_index + 1) + '</span>'
+        : '';
+      out += '<div class="reply-row">' +
+        '<div><span class="reply-kind">&rarr; ' + esc(kind) + '</span>' + ref + '</div>' +
+        '<div class="reply-content">' + esc(content) + '</div>' +
+        '</div>';
+    });
+    out += '</div>';
+    return out;
+  }
+
+  function renderTurns(turns, replies) {
     if (!turns.length) {
       return '<div class="tool-empty">No turns recorded.</div>';
     }
-    var lastTextIdx = -1;
-    for (var i = turns.length - 1; i >= 0; i--) {
-      if (turns[i] && turns[i].type === 'text') {
-        lastTextIdx = i;
-        break;
+    var sentTurnIdx = {};
+    (replies || []).forEach(function (r) {
+      if (r && typeof r.turn_index === 'number' && r.turn_index >= 0) {
+        sentTurnIdx[r.turn_index] = true;
       }
-    }
+    });
     var out = '<div class="tool-list">';
     turns.forEach(function (turn, idx) {
+      var sent = !!sentTurnIdx[idx];
       if (turn && turn.type === 'text') {
-        out += renderTextTurn(turn, idx === lastTextIdx);
+        out += renderTextTurn(turn, sent);
       } else if (turn && turn.type === 'thinking') {
         out += renderThinkingTurn(turn);
       } else {
-        out += renderToolTurn(turn || {});
+        out += renderToolTurn(turn || {}, sent);
       }
     });
     out += '</div>';
     return out;
   }
 
-  function renderToolTurn(tool) {
+  function renderToolTurn(tool, sentToUser) {
     var cls = 'tool-row';
-    if (isRexCommand(tool)) cls += ' rex-user-tool';
+    var badge = '';
+    if (sentToUser || isRexCommand(tool)) {
+      cls += ' rex-user-tool';
+      badge = '<span class="to-user-badge">&rarr; user</span>';
+    }
     return '<div class="' + cls + '">' +
-      '<div class="tool-name">' + esc(tool.name || '?') + '</div>' +
+      '<div class="tool-name">' + esc(tool.name || '?') + badge + '</div>' +
       renderToolInput(tool.name, tool.input) +
       '</div>';
   }
@@ -925,9 +1045,13 @@
   function renderTextTurn(turn, isUserMessage) {
     var text = turn.text == null ? '' : String(turn.text);
     var cls = 'tool-row text-turn';
-    if (isUserMessage) cls += ' user-message';
+    var badge = '';
+    if (isUserMessage) {
+      cls += ' user-message';
+      badge = '<span class="to-user-badge">&rarr; user</span>';
+    }
     return '<div class="' + cls + '">' +
-      '<div class="tool-name">assistant</div>' +
+      '<div class="tool-name">assistant' + badge + '</div>' +
       '<div class="tool-input">' + esc(text) + '</div>' +
       '</div>';
   }

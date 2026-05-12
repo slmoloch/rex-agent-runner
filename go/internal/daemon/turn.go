@@ -17,9 +17,99 @@ import (
 // marker.
 const NoReplyMarker = "NO_REPLY"
 
-// calledRexUser reports whether any turn invoked `rex user text|rich-text|
-// voice|file` to deliver content out-of-band. When true, the daemon
-// suppresses the final text so the user doesn't get a duplicate message.
+// rexUserReply is a `rex user <kind> <content>` invocation found inside a
+// tool turn. TurnIndex is the position in the original turns slice so the
+// UI can correlate replies back to the trace.
+type rexUserReply struct {
+	Kind      string
+	Content   string
+	TurnIndex int
+}
+
+// scanRexUserReplies walks the turns and returns one entry per `rex user
+// text|rich-text|voice|file ...` Bash invocation. The substring match
+// mirrors calledRexUser so detection stays consistent between the two paths.
+func scanRexUserReplies(turns []claude.Turn) []rexUserReply {
+	var out []rexUserReply
+	for i, t := range turns {
+		if t.Type != "tool" || t.Name != "Bash" {
+			continue
+		}
+		input, ok := t.Input.(map[string]any)
+		if !ok {
+			continue
+		}
+		cmd, _ := input["command"].(string)
+		if !strings.Contains(cmd, "rex user ") {
+			continue
+		}
+		kind, content, ok := parseRexUserCmd(cmd)
+		if !ok {
+			continue
+		}
+		out = append(out, rexUserReply{Kind: kind, Content: content, TurnIndex: i})
+	}
+	return out
+}
+
+// parseRexUserCmd pulls (kind, content) out of a shell command that contains
+// `rex user <kind> <content>`. Content is best-effort unquoted; complex
+// shell constructs (substitution, heredocs) are kept as-is so the UI shows
+// something readable rather than nothing.
+func parseRexUserCmd(cmd string) (kind, content string, ok bool) {
+	const needle = "rex user "
+	s := cmd
+	for {
+		idx := strings.Index(s, needle)
+		if idx < 0 {
+			return "", "", false
+		}
+		if idx == 0 || isShellBoundary(s[idx-1]) {
+			s = s[idx+len(needle):]
+			break
+		}
+		s = s[idx+1:]
+	}
+	s = strings.TrimLeft(s, " \t")
+	end := strings.IndexAny(s, " \t\n")
+	if end < 0 {
+		return s, "", true
+	}
+	kind = s[:end]
+	content = stripOuterQuotes(strings.TrimSpace(s[end:]))
+	return kind, content, true
+}
+
+func isShellBoundary(c byte) bool {
+	switch c {
+	case ' ', '\t', '\n', ';', '|', '&', '(':
+		return true
+	}
+	return false
+}
+
+func stripOuterQuotes(s string) string {
+	if len(s) < 2 {
+		return s
+	}
+	first, last := s[0], s[len(s)-1]
+	if first == last && (first == '"' || first == '\'') {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+// findLastTextTurn returns the index of the last "text" turn in the slice,
+// or -1 if there isn't one.
+func findLastTextTurn(turns []claude.Turn) int {
+	for i := len(turns) - 1; i >= 0; i-- {
+		if turns[i].Type == "text" {
+			return i
+		}
+	}
+	return -1
+}
+
 func calledRexUser(turns []claude.Turn) bool {
 	for _, t := range turns {
 		if t.Type != "tool" || t.Name != "Bash" {
@@ -76,10 +166,27 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 		d.sessions.Register(newID, name)
 	}
 
-	suppressReply := strings.Contains(result.Response, NoReplyMarker) || calledRexUser(result.Turns)
+	rexReplies := scanRexUserReplies(result.Turns)
+	finalSuppressed := strings.Contains(result.Response, NoReplyMarker) || len(rexReplies) > 0
 	response := result.Response
-	if suppressReply {
+	if finalSuppressed {
 		response = strings.TrimSpace(strings.ReplaceAll(response, NoReplyMarker, ""))
+	}
+
+	replies := make([]events.Reply, 0, len(rexReplies)+1)
+	for _, r := range rexReplies {
+		replies = append(replies, events.Reply{
+			Kind:      r.Kind,
+			Content:   r.Content,
+			TurnIndex: r.TurnIndex,
+		})
+	}
+	if !finalSuppressed && strings.TrimSpace(response) != "" {
+		replies = append(replies, events.Reply{
+			Kind:      "final",
+			Content:   response,
+			TurnIndex: findLastTextTurn(result.Turns),
+		})
 	}
 
 	ev := events.Event{
@@ -93,12 +200,14 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 		NumTurns:        result.NumTurns,
 		CallerSession:   callerSession,
 		Turns:           result.Turns,
+		ReplySent:       len(replies) > 0,
+		Replies:         replies,
 	}
 	if err := d.events.Append(ev); err != nil {
 		slog.Error("events append", "err", err)
 	}
 
-	return response, suppressReply
+	return response, finalSuppressed
 }
 
 // RunJob matches server.JobFunc. It injects caller-session context into the
