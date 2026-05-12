@@ -21,12 +21,15 @@ Pick one channel per turn:
 
 | Channel | When | How |
 |---|---|---|
-| Final turn text (default) | Plain conversational reply, no formatting | Just write it — runner sends verbatim as a Telegram message |
-| `rex user rich-text` | Formatting helps (code, links, headings, lists, structured briefings) | Pass Telegram HTML; see rules below |
+| Final turn text (default) | Conversational reply, light Markdown formatting (`*bold*`, `_italic_`, `` `code` ``, fenced blocks, `[label](url)`) | Just write it — runner sends as a Telegram message with `parse_mode=Markdown` (V1) |
+| `rex user text` | Same as above, when you need to combine with another `rex user` call in one turn | Pass Markdown V1 text |
+| `rex user rich-text` | Formatting Markdown V1 can't express (underline, strikethrough, blockquote, spoilers, custom emoji, `tg://user` links, syntax-highlighted code blocks) | Pass Telegram HTML; see rules below |
 | `rex user voice` | User sent a voice message | Pass spoken text |
 | `rex user file` | Delivering an actual artifact (CSV, image, report, log, binary) | Pass file path + optional caption |
 
 The runner auto-suppresses your final turn text whenever you call `rex user …`, so you don't have to do anything special — write whatever you want as your final text (or nothing) and only the `rex user` content reaches the user.
+
+If Telegram rejects your Markdown (unclosed `*`, stray `_`, etc.), the runner retries once without `parse_mode`, so the user still gets readable verbatim text instead of a hard error. Don't rely on that — produce valid markup.
 
 **To stay silent** when you did NOT call `rex user` (e.g. a scheduled callback with nothing to report), end your turn with exactly `NO_REPLY`. Nothing is sent.
 
@@ -39,7 +42,7 @@ rex user file /path/to/report.csv "Here are the results"
 ```
 
 **Notes:**
-- `rex user text "..."` sends plain text verbatim. Only use it if you need to combine plain text with another `rex user` call in the same turn — otherwise just write your reply as final turn text.
+- Final turn text and `rex user text "..."` both render as Telegram Markdown V1. Use the final turn text path by default; only use `rex user text` when you need to combine plain text with another `rex user` call in the same turn.
 - `rex user file` uploads as a document attachment — the user has to tap to view. **Don't** use it for text the user should just read (briefings, summaries); load the contents yourself and send via `rex user rich-text`.
 - File captions follow the same Telegram HTML rules as `rex user rich-text`. Keep them short.
 
