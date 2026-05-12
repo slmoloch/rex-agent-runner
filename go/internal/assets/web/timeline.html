@@ -343,6 +343,11 @@
     max-height: 240px;
     overflow-y: auto;
   }
+  .tool-row.text-turn.user-message {
+    background: #0a2818;
+    border-color: #2ea043;
+  }
+  .tool-row.text-turn.user-message .tool-name { color: #56d364; }
   .tool-row.thinking-turn {
     background: #161122;
     border-color: #3a2f5c;
@@ -854,11 +859,6 @@
     html += '<div class="modal-section">' +
       '<div class="modal-label">Turns (' + turns.length + ')</div>' +
       renderTurns(turns) + '</div>';
-    if (ev.response_preview) {
-      html += '<div class="modal-section">' +
-        '<div class="modal-label">Response</div>' +
-        '<div class="modal-content">' + esc(ev.response_preview) + '</div></div>';
-    }
 
     body.innerHTML = html;
     backdrop.classList.add('visible');
@@ -881,10 +881,17 @@
     if (!turns.length) {
       return '<div class="tool-empty">No turns recorded.</div>';
     }
+    var lastTextIdx = -1;
+    for (var i = turns.length - 1; i >= 0; i--) {
+      if (turns[i] && turns[i].type === 'text') {
+        lastTextIdx = i;
+        break;
+      }
+    }
     var out = '<div class="tool-list">';
-    turns.forEach(function (turn) {
+    turns.forEach(function (turn, idx) {
       if (turn && turn.type === 'text') {
-        out += renderTextTurn(turn);
+        out += renderTextTurn(turn, idx === lastTextIdx);
       } else if (turn && turn.type === 'thinking') {
         out += renderThinkingTurn(turn);
       } else {
@@ -915,9 +922,11 @@
     return /^rex(\s|$)/.test(cmd);
   }
 
-  function renderTextTurn(turn) {
+  function renderTextTurn(turn, isUserMessage) {
     var text = turn.text == null ? '' : String(turn.text);
-    return '<div class="tool-row text-turn">' +
+    var cls = 'tool-row text-turn';
+    if (isUserMessage) cls += ' user-message';
+    return '<div class="' + cls + '">' +
       '<div class="tool-name">assistant</div>' +
       '<div class="tool-input">' + esc(text) + '</div>' +
       '</div>';
