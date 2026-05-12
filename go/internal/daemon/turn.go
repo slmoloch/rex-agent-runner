@@ -11,10 +11,31 @@ import (
 )
 
 // NoReplyMarker is the sentinel the agent emits as its final turn text to
-// tell the daemon not to forward anything to the user. Use it after already
-// delivering a reply via `rex user`, or in callbacks/jobs that don't need
-// to say anything to the user.
+// tell the daemon to stay silent (e.g. a callback with nothing to report).
+// When the agent uses `rex user ...` to deliver a reply, the daemon detects
+// that automatically and suppresses the final text without needing this
+// marker.
 const NoReplyMarker = "NO_REPLY"
+
+// calledRexUser reports whether any turn invoked `rex user text|rich-text|
+// voice|file` to deliver content out-of-band. When true, the daemon
+// suppresses the final text so the user doesn't get a duplicate message.
+func calledRexUser(turns []claude.Turn) bool {
+	for _, t := range turns {
+		if t.Type != "tool" || t.Name != "Bash" {
+			continue
+		}
+		input, ok := t.Input.(map[string]any)
+		if !ok {
+			continue
+		}
+		cmd, _ := input["command"].(string)
+		if strings.Contains(cmd, "rex user ") {
+			return true
+		}
+	}
+	return false
+}
 
 // runInSession runs one Claude turn for the given session target, persists
 // the event, and returns the response text along with a flag telling the
@@ -55,7 +76,7 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 		d.sessions.Register(newID, name)
 	}
 
-	suppressReply := strings.Contains(result.Response, NoReplyMarker)
+	suppressReply := strings.Contains(result.Response, NoReplyMarker) || calledRexUser(result.Turns)
 	response := result.Response
 	if suppressReply {
 		response = strings.TrimSpace(strings.ReplaceAll(response, NoReplyMarker, ""))
