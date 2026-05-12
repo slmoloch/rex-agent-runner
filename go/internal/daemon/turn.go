@@ -15,11 +15,10 @@ import (
 // fallback that would otherwise forward the final text to the user.
 const ReplyMarker = "used_rex_to_reply"
 
-// runInSession is the Go port of rex_bot.py:_run_in_session. It runs one
-// Claude turn for the given session target, persists the event, and returns
-// the response text along with a flag telling the caller whether the turn
-// already delivered a reply via `rex user` (so the fallback text reply
-// should be suppressed).
+// runInSession runs one Claude turn for the given session target, persists
+// the event, and returns the response text along with a flag telling the
+// caller whether the turn already delivered a reply via `rex user` (in
+// which case the response text should not be forwarded to the user).
 func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigger, callerSession string) (string, bool) {
 	sessionID := d.sessions.Resolve(sessionTarget)
 
@@ -61,16 +60,6 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 		response = strings.TrimSpace(strings.ReplaceAll(response, ReplyMarker, ""))
 	}
 
-	if len(result.RexUserSends) > 0 {
-		modes := make([]string, 0, len(result.RexUserSends))
-		for _, s := range result.RexUserSends {
-			if m, ok := s["mode"].(string); ok {
-				modes = append(modes, m)
-			}
-		}
-		slog.Info("rex user delivered", "count", len(result.RexUserSends), "modes", modes, "marker", usedRexUser)
-	}
-
 	ev := events.Event{
 		Session:         sessionTarget,
 		SessionID:       newID,
@@ -82,9 +71,6 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 		NumTurns:        result.NumTurns,
 		CallerSession:   callerSession,
 		Turns:           result.Turns,
-	}
-	if len(result.RexUserSends) > 0 {
-		ev.RexUserSends = result.RexUserSends
 	}
 	if err := d.events.Append(ev); err != nil {
 		slog.Error("events append", "err", err)

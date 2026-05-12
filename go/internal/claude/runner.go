@@ -5,8 +5,6 @@ package claude
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,21 +32,19 @@ type Options struct {
 
 // Result is everything the caller gets back from a run.
 type Result struct {
-	Response     string        `json:"response"`
-	SessionID    string        `json:"session_id"`
-	CostUSD      float64       `json:"cost_usd"`
-	Duration     time.Duration `json:"duration_ms"`
-	NumTurns     int           `json:"num_turns"`
-	Turns        []Turn        `json:"turns"`
-	RexUserSends []RexUserSend `json:"rex_user_sends"`
+	Response  string        `json:"response"`
+	SessionID string        `json:"session_id"`
+	CostUSD   float64       `json:"cost_usd"`
+	Duration  time.Duration `json:"duration_ms"`
+	NumTurns  int           `json:"num_turns"`
+	Turns     []Turn        `json:"turns"`
 }
 
 // Runner executes Claude Code. It is immutable after construction; a single
 // Runner can serve many concurrent Run calls.
 type Runner struct {
-	Bin           string // path to the claude CLI
-	Workdir       string // cwd for the subprocess
-	TurnMarkerDir string // <workspace>/.rex/turn-markers
+	Bin     string // path to the claude CLI
+	Workdir string // cwd for the subprocess
 }
 
 // Run launches one turn. The returned error is non-nil only for "we couldn't
@@ -87,10 +83,9 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 		defer stop()
 	}
 
-	turnID := newTurnID()
 	cmd := exec.CommandContext(runCtx, r.Bin, args...)
 	cmd.Dir = r.Workdir
-	cmd.Env = append(os.Environ(), "REX_TURN_ID="+turnID)
+	cmd.Env = os.Environ()
 	if opts.SessionID != "" {
 		cmd.Env = append(cmd.Env, "REX_SESSION_ID="+opts.SessionID)
 	}
@@ -108,7 +103,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	slog.Info("claude start", "prompt_preview", truncate(opts.Prompt, 200),
-		"session", opts.SessionID, "turn", turnID)
+		"session", opts.SessionID)
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %s: %w", r.Bin, err)
@@ -176,10 +171,6 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	cancel()
 	<-watchdogDone
 
-	// Always drain markers, even on failure — partial turns may have sent replies.
-	sends := drainTurnMarkers(r.TurnMarkerDir, turnID)
-	state.sends = sends
-
 	// Timeout paths.
 	select {
 	case since := <-idleExceeded:
@@ -224,18 +215,16 @@ type runState struct {
 	numTurns     int
 	durationMS   int
 	turns        []Turn
-	sends        []RexUserSend
 }
 
 func (s *runState) toResult(responseOverride string) *Result {
 	return &Result{
-		Response:     responseOverride,
-		SessionID:    s.sessionID,
-		CostUSD:      s.costUSD,
-		Duration:     time.Duration(s.durationMS) * time.Millisecond,
-		NumTurns:     s.numTurns,
-		Turns:        s.turns,
-		RexUserSends: s.sends,
+		Response:  responseOverride,
+		SessionID: s.sessionID,
+		CostUSD:   s.costUSD,
+		Duration:  time.Duration(s.durationMS) * time.Millisecond,
+		NumTurns:  s.numTurns,
+		Turns:     s.turns,
 	}
 }
 
@@ -375,12 +364,6 @@ func FindBin(configured string) string {
 		}
 	}
 	return "claude"
-}
-
-func newTurnID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
 }
 
 func truncate(s string, n int) string {

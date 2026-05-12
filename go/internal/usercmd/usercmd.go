@@ -1,17 +1,13 @@
-// Package usercmd implements `rex user {text|voice|file}`. These commands are
-// called by Claude during a turn to deliver messages to the user, and they
-// record a marker file the daemon drains to know the reply was sent.
+// Package usercmd implements `rex user {text|rich-text|voice|file}`. These
+// commands are called by Claude during a turn to deliver messages to the user.
 package usercmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/slmoloch/rex-agent-runner/internal/config"
 	"github.com/slmoloch/rex-agent-runner/internal/telegram"
@@ -33,7 +29,7 @@ Notes:
 
 // Run dispatches the user subcommand. Returns a non-nil error for failures;
 // special ExitUnavailable is returned when voice is configured-off (exit 2).
-func Run(ctx context.Context, cfg *config.Config, ws workspace.Paths, args []string) error {
+func Run(ctx context.Context, cfg *config.Config, _ workspace.Paths, args []string) error {
 	if len(args) == 0 {
 		return errors.New(Usage)
 	}
@@ -46,20 +42,12 @@ func Run(ctx context.Context, cfg *config.Config, ws workspace.Paths, args []str
 		if len(args) < 2 {
 			return errors.New("rex user text <message>")
 		}
-		msg := strings.Join(args[1:], " ")
-		if err := tg.SendMessage(ctx, msg); err != nil {
-			return err
-		}
-		return logSend(ws, "text", map[string]any{"message": msg})
+		return tg.SendMessage(ctx, strings.Join(args[1:], " "))
 	case "rich-text":
 		if len(args) < 2 {
 			return errors.New("rex user rich-text <message>")
 		}
-		msg := strings.Join(args[1:], " ")
-		if err := tg.SendMessageHTML(ctx, msg); err != nil {
-			return err
-		}
-		return logSend(ws, "rich-text", map[string]any{"message": msg})
+		return tg.SendMessageHTML(ctx, strings.Join(args[1:], " "))
 	case "voice":
 		if len(args) < 2 {
 			return errors.New("rex user voice <message>")
@@ -83,10 +71,7 @@ func Run(ctx context.Context, cfg *config.Config, ws workspace.Paths, args []str
 		if err := vc.Synthesize(ctx, msg, tmpPath); err != nil {
 			return fmt.Errorf("TTS synthesis failed: %w", err)
 		}
-		if err := tg.SendVoice(ctx, tmpPath); err != nil {
-			return err
-		}
-		return logSend(ws, "voice", map[string]any{"message": msg})
+		return tg.SendVoice(ctx, tmpPath)
 	case "file":
 		if len(args) < 2 {
 			return errors.New("rex user file <path> [caption]")
@@ -96,14 +81,7 @@ func Run(ctx context.Context, cfg *config.Config, ws workspace.Paths, args []str
 		if _, err := os.Stat(path); err != nil {
 			return fmt.Errorf("file not found: %s", path)
 		}
-		if err := tg.SendDocument(ctx, path, caption); err != nil {
-			return err
-		}
-		payload := map[string]any{"path": path}
-		if caption != "" {
-			payload["caption"] = caption
-		}
-		return logSend(ws, "file", payload)
+		return tg.SendDocument(ctx, path, caption)
 	default:
 		return fmt.Errorf("unknown subcommand: %s\n%s", args[0], Usage)
 	}
@@ -127,32 +105,4 @@ func newTelegram(cfg *config.Config) (*telegram.Client, error) {
 		return nil, errors.New("no telegram_chat_id and no allowed_user_ids")
 	}
 	return telegram.New(cfg.TelegramBotToken, chat), nil
-}
-
-// logSend appends one jsonl record to the current turn-marker file so the
-// daemon knows this turn already delivered a reply.
-func logSend(ws workspace.Paths, mode string, payload map[string]any) error {
-	turnID := os.Getenv("REX_TURN_ID")
-	if turnID == "" {
-		return nil
-	}
-	if err := os.MkdirAll(ws.TurnMarkerDir, 0o755); err != nil {
-		return nil // non-fatal
-	}
-	entry := map[string]any{"mode": mode, "ts": time.Now().Format(time.RFC3339Nano)}
-	for k, v := range payload {
-		entry[k] = v
-	}
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return nil
-	}
-	path := filepath.Join(ws.TurnMarkerDir, turnID+".jsonl")
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	_, _ = f.Write(append(data, '\n'))
-	return nil
 }

@@ -95,7 +95,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	d := &Daemon{
 		cfg:          cfg,
 		ws:           ws,
-		runner:       &claude.Runner{Bin: claude.FindBin(cfg.ClaudeBin), Workdir: ws.Root, TurnMarkerDir: ws.TurnMarkerDir},
+		runner:       &claude.Runner{Bin: claude.FindBin(cfg.ClaudeBin), Workdir: ws.Root},
 		events:       evStore,
 		timeline:     tlStore,
 		sessions:     seStore,
@@ -106,8 +106,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		systemPrompt: systemPrompt,
 		jobPort:      port,
 	}
-
-	d.cleanupStaleTurnMarkers()
 
 	srv, err := server.Listen(port, server.New(tlStore, seStore, cbStore, d.RunJob).Routes())
 	if err != nil {
@@ -166,25 +164,6 @@ func joinNonEmpty(parts []string, sep string) string {
 		out += p
 	}
 	return out
-}
-
-const staleMarkerAge = 24 * time.Hour
-
-func (d *Daemon) cleanupStaleTurnMarkers() {
-	entries, err := os.ReadDir(d.ws.TurnMarkerDir)
-	if err != nil {
-		return
-	}
-	cutoff := time.Now().Add(-staleMarkerAge)
-	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().Before(cutoff) {
-			_ = os.Remove(d.ws.TurnMarkerDir + string(os.PathSeparator) + e.Name())
-		}
-	}
 }
 
 func shutdown(srv *http.Server) {
