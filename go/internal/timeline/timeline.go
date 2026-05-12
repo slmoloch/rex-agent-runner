@@ -40,14 +40,16 @@ CREATE TABLE IF NOT EXISTS events (
     duration_ms INTEGER,
     num_turns INTEGER,
     caller_session TEXT,
-    turns TEXT
+    turns TEXT,
+    reply_sent INTEGER,
+    replies TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_sid ON events(session_id);
 `
 
-// Row mirrors the events table. Turns is stored as JSON text and decoded
-// on read so callers get native types.
+// Row mirrors the events table. Turns and Replies are stored as JSON text
+// and decoded on read so callers get native types.
 type Row struct {
 	Timestamp       string  `json:"timestamp"`
 	Session         string  `json:"session,omitempty"`
@@ -60,6 +62,17 @@ type Row struct {
 	NumTurns        int     `json:"num_turns,omitempty"`
 	CallerSession   string  `json:"caller_session,omitempty"`
 	Turns           any     `json:"turns,omitempty"`
+	ReplySent       bool    `json:"reply_sent,omitempty"`
+	Replies         []Reply `json:"replies,omitempty"`
+}
+
+// Reply mirrors events.Reply (kept in this package so timeline has no upward
+// dependency). One row's Replies are the user-facing messages the daemon
+// actually delivered during the turn.
+type Reply struct {
+	Kind      string `json:"kind"`
+	Content   string `json:"content,omitempty"`
+	TurnIndex int    `json:"turn_index"`
 }
 
 type Store struct {
@@ -85,9 +98,11 @@ func Open(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, ok := cols["turns"]; !ok {
-		db.Close()
-		return nil, ErrStaleSchema
+	for _, required := range []string{"turns", "reply_sent", "replies"} {
+		if _, ok := cols[required]; !ok {
+			db.Close()
+			return nil, ErrStaleSchema
+		}
 	}
 	return &Store{db: db}, nil
 }
@@ -150,19 +165,33 @@ func (s *Store) Insert(r Row) error {
 	if err != nil {
 		return err
 	}
+	var replies any
+	if len(r.Replies) > 0 {
+		replies, err = encodeJSON(r.Replies)
+		if err != nil {
+			return err
+		}
+	}
 	_, err = s.db.Exec(`
 		INSERT INTO events (
 			timestamp, session, session_id, trigger,
 			prompt_preview, response_preview,
 			cost_usd, duration_ms, num_turns, caller_session,
-			turns
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			turns, reply_sent, replies
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.Timestamp, r.Session, r.SessionID, r.Trigger,
 		r.PromptPreview, r.ResponsePreview,
 		r.CostUSD, r.DurationMS, r.NumTurns, r.CallerSession,
-		turns,
+		turns, boolToInt(r.ReplySent), replies,
 	)
 	return err
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // Query returns rows matching the window. Exactly one of days or since should
@@ -177,7 +206,7 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 			`SELECT timestamp, session, session_id, trigger,
 			        prompt_preview, response_preview,
 			        cost_usd, duration_ms, num_turns, caller_session,
-			        turns
+			        turns, reply_sent, replies
 			 FROM events WHERE timestamp > ?
 			 ORDER BY timestamp DESC`, since)
 	} else {
@@ -186,7 +215,7 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 			`SELECT timestamp, session, session_id, trigger,
 			        prompt_preview, response_preview,
 			        cost_usd, duration_ms, num_turns, caller_session,
-			        turns
+			        turns, reply_sent, replies
 			 FROM events WHERE timestamp >= ?
 			 ORDER BY timestamp DESC`, cutoff)
 	}
@@ -198,21 +227,36 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 	var out []Row
 	for rows.Next() {
 		var (
-			r     Row
-			turns sql.NullString
+			r         Row
+			turns     sql.NullString
+			replies   sql.NullString
+			replySent sql.NullInt64
 		)
 		if err := rows.Scan(
 			&r.Timestamp, &r.Session, &r.SessionID, &r.Trigger,
 			&r.PromptPreview, &r.ResponsePreview,
 			&r.CostUSD, &r.DurationMS, &r.NumTurns, &r.CallerSession,
-			&turns,
+			&turns, &replySent, &replies,
 		); err != nil {
 			return nil, err
 		}
 		r.Turns = decodeJSON(turns)
+		r.ReplySent = replySent.Valid && replySent.Int64 != 0
+		r.Replies = decodeReplies(replies)
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+func decodeReplies(ns sql.NullString) []Reply {
+	if !ns.Valid || ns.String == "" {
+		return nil
+	}
+	var out []Reply
+	if err := json.Unmarshal([]byte(ns.String), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // Stats are computed via indexed aggregations — O(1) regardless of history size.
@@ -289,8 +333,8 @@ func (s *Store) Rebuild(paths []string) (int, error) {
 			timestamp, session, session_id, trigger,
 			prompt_preview, response_preview,
 			cost_usd, duration_ms, num_turns, caller_session,
-			turns
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+			turns, reply_sent, replies
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return 0, err
 	}
