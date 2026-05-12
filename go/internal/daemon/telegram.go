@@ -110,6 +110,14 @@ func (d *Daemon) handleNewConversation(ctx context.Context) {
 	}
 	d.sessions.ResetMain()
 	_ = d.tg.SendMessage(ctx, "Session reset. Send a message to start fresh.")
+
+	today := time.Now().Format("2006-01-02")
+	initPrompt := "Your session has been reset (user requested via /new). Today's date is " + today + "."
+	func() {
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+		_, _ = d.runInSession(cctx, initPrompt, session.Main, "new-reset", "")
+	}()
 }
 
 func (d *Daemon) handleText(ctx context.Context, m *telegram.Message) {
