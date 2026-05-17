@@ -37,13 +37,15 @@ If Telegram rejects your Markdown (unclosed `*`, stray `_`, etc.), the runner re
 
 ```bash
 rex user rich-text "<b>Heads up:</b> deploy finished. See <a href=\"https://example.com\">logs</a>."
+rex user rich-text --file /tmp/reply.html
 rex user voice "Your spoken reply here"
 rex user file /path/to/report.csv "Here are the results"
 ```
 
 **Notes:**
 - Final turn text and `rex user text "..."` both render as Telegram Markdown V1. Use the final turn text path by default; only use `rex user text` when you need to combine plain text with another `rex user` call in the same turn.
-- `rex user file` uploads as a document attachment — the user has to tap to view. **Don't** use it for text the user should just read (briefings, summaries); load the contents yourself and send via `rex user rich-text`.
+- For long or multi-line messages, write the body to a file and pass `--file <path>` to `rex user text` or `rex user rich-text` instead of inlining the contents on the command line (avoids shell-quoting issues and `cat`/`$(…)` substitutions).
+- `rex user file` uploads as a document attachment — the user has to tap to view. **Don't** use it for text the user should just read (briefings, summaries); load the contents yourself and send via `rex user rich-text` (use `--file` for long bodies).
 - File captions follow the same Telegram HTML rules as `rex user rich-text`. Keep them short.
 
 **Telegram HTML formatting rules (apply to `rex user rich-text` and `rex user file` captions):**
