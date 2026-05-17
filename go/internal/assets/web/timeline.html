@@ -344,10 +344,13 @@
     overflow-y: auto;
   }
   .tool-row.text-turn.user-message {
-    background: #0a2818;
-    border-color: #2ea043;
+    /* Final assistant text that the daemon forwarded to the user. Coloured
+       cyan/teal to stay distinct from .rex-user-tool, which is reserved
+       for explicit `rex user ...` Bash calls (green). */
+    background: #0a1f24;
+    border-color: #1f5e6e;
   }
-  .tool-row.text-turn.user-message .tool-name { color: #56d364; }
+  .tool-row.text-turn.user-message .tool-name { color: #56d4d4; }
   .tool-row.thinking-turn {
     background: #161122;
     border-color: #3a2f5c;
@@ -381,6 +384,42 @@
     letter-spacing: 0.5px;
     vertical-align: middle;
   }
+  /* Tool result rows — output coming back from a tool. Amber/orange to
+     contrast with the blue/purple input rows directly above them, so the
+     reader can tell input from output at a glance. is-error swaps to a
+     red palette without changing the layout. */
+  .tool-row.tool-result {
+    background: #1c1408;
+    border-color: #6e4a14;
+  }
+  .tool-row.tool-result .tool-name { color: #f0b070; }
+  .tool-row.tool-result .tool-cmd {
+    border-left-color: #f0b070;
+    color: #f5d49b;
+  }
+  .tool-row.tool-result .tool-input { color: #e6c47f; }
+  .tool-row.tool-result.is-error {
+    background: #2a0e0e;
+    border-color: #8a2222;
+  }
+  .tool-row.tool-result.is-error .tool-name { color: #ff7b72; }
+  .tool-row.tool-result.is-error .tool-cmd {
+    border-left-color: #f85149;
+    color: #ffa198;
+  }
+  .tool-row.tool-result .err-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    color: #2a0e0e;
+    background: #ff7b72;
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    vertical-align: middle;
+  }
   .sid-mono {
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-size: 11px;
@@ -394,7 +433,7 @@
 <header>
   <h1>Rex Timeline</h1>
   <div class="legend">
-    <div class="legend-item"><div class="legend-swatch" style="background:#3fb950"></div>telegram</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#39c5cf"></div>telegram</div>
     <div class="legend-item"><div class="legend-swatch" style="background:#d29922"></div>callback</div>
     <div class="legend-item"><div class="legend-swatch" style="background:#bc8cff"></div>dispatch</div>
     <div class="legend-item"><div class="legend-swatch" style="background:#f85149"></div>gc</div>
@@ -444,7 +483,10 @@
   var MIN_EVENT_W = 8;
 
   var COLORS = {
-    telegram: '#3fb950',
+    // Telegram colour was green; reassigned to its brand cyan so that
+    // green can stay exclusive to `rex user`-related visuals (see
+    // .rex-user-tool / `→ rex user` legend item).
+    telegram: '#39c5cf',
     callback: '#d29922',
     dispatch: '#bc8cff',
     gc: '#f85149',
@@ -894,12 +936,56 @@
         out += renderTextTurn(turn, idx === lastTextIdx);
       } else if (turn && turn.type === 'thinking') {
         out += renderThinkingTurn(turn);
+      } else if (turn && turn.type === 'tool_result') {
+        out += renderToolResultTurn(turn);
       } else {
         out += renderToolTurn(turn || {});
       }
     });
     out += '</div>';
     return out;
+  }
+
+  // Renders a tool_result turn as an amber/orange row so the reader can
+  // visually pair it with the blue tool row that produced it. The output
+  // body can be either a clipped string (most tools, e.g. Bash stdout) or
+  // an array of typed content blocks (Read of an image, etc) — handled
+  // separately so multimodal results don't render as `[object Object]`.
+  function renderToolResultTurn(turn) {
+    var cls = 'tool-row tool-result' + (turn.is_error ? ' is-error' : '');
+    var nameLabel = turn.is_error ? 'tool error' : 'tool output';
+    var tag = turn.is_error ? '<span class="err-tag">error</span>' : '';
+    return '<div class="' + cls + '">' +
+      '<div class="tool-name">' + nameLabel + tag + '</div>' +
+      renderToolResultBody(turn.output) +
+      '</div>';
+  }
+
+  function renderToolResultBody(output) {
+    if (output == null || output === '') return '<div class="tool-empty">(empty)</div>';
+    if (typeof output === 'string') {
+      return '<div class="tool-cmd">' + esc(output) + '</div>';
+    }
+    if (Array.isArray(output)) {
+      // Multimodal content array: [{type:"text"|"image", ...}, ...]
+      var parts = output.map(function (b) {
+        if (b && b.type === 'text' && typeof b.text === 'string') {
+          return '<div class="tool-cmd">' + esc(b.text) + '</div>';
+        }
+        if (b && b.type === 'image') {
+          var mt = (b.source && b.source.media_type) || 'image';
+          return '<div class="tool-field"><span class="tool-field-value is-desc">' +
+            esc('[image: ' + mt + ']') + '</span></div>';
+        }
+        // Unknown block shape — render keys generically.
+        return renderGenericInput(b || {});
+      });
+      return parts.join('');
+    }
+    if (typeof output === 'object') {
+      return renderGenericInput(output);
+    }
+    return '<div class="tool-cmd">' + esc(String(output)) + '</div>';
   }
 
   function renderToolTurn(tool) {

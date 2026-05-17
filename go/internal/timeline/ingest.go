@@ -43,6 +43,14 @@ func ingest(stmt *sql.Stmt, r io.Reader) (int, error) {
 			asInt(raw["num_turns"]),
 			asStr(raw["caller_session"]),
 			turns,
+			// Token columns are absent from pre-bump JSONL — asInt returns
+			// 0, which is the correct "unknown" value here.
+			asInt(raw["input_tokens"]),
+			asInt(raw["cache_creation_input_tokens"]),
+			asInt(raw["cache_read_input_tokens"]),
+			asInt(raw["output_tokens"]),
+			asInt(raw["context_tokens"]),
+			asInt(raw["cache_read_tokens"]),
 		); err != nil {
 			return count, err
 		}

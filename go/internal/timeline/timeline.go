@@ -40,7 +40,13 @@ CREATE TABLE IF NOT EXISTS events (
     duration_ms INTEGER,
     num_turns INTEGER,
     caller_session TEXT,
-    turns TEXT
+    turns TEXT,
+    input_tokens INTEGER,
+    cache_creation_input_tokens INTEGER,
+    cache_read_input_tokens INTEGER,
+    output_tokens INTEGER,
+    context_tokens INTEGER,
+    cache_read_tokens INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_sid ON events(session_id);
@@ -60,6 +66,13 @@ type Row struct {
 	NumTurns        int     `json:"num_turns,omitempty"`
 	CallerSession   string  `json:"caller_session,omitempty"`
 	Turns           any     `json:"turns,omitempty"`
+
+	InputTokens              int `json:"input_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	OutputTokens             int `json:"output_tokens,omitempty"`
+	ContextTokens            int `json:"context_tokens,omitempty"`
+	CacheReadTokens          int `json:"cache_read_tokens,omitempty"`
 }
 
 type Store struct {
@@ -85,9 +98,14 @@ func Open(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, ok := cols["turns"]; !ok {
-		db.Close()
-		return nil, ErrStaleSchema
+	// Each required column was added in a schema bump; if any are missing
+	// the user needs to `rex timeline rebuild` to reindex from the JSONL
+	// audit log.
+	for _, c := range []string{"turns", "input_tokens", "context_tokens"} {
+		if _, ok := cols[c]; !ok {
+			db.Close()
+			return nil, ErrStaleSchema
+		}
 	}
 	return &Store{db: db}, nil
 }
@@ -155,12 +173,16 @@ func (s *Store) Insert(r Row) error {
 			timestamp, session, session_id, trigger,
 			prompt_preview, response_preview,
 			cost_usd, duration_ms, num_turns, caller_session,
-			turns
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			turns,
+			input_tokens, cache_creation_input_tokens, cache_read_input_tokens,
+			output_tokens, context_tokens, cache_read_tokens
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.Timestamp, r.Session, r.SessionID, r.Trigger,
 		r.PromptPreview, r.ResponsePreview,
 		r.CostUSD, r.DurationMS, r.NumTurns, r.CallerSession,
 		turns,
+		r.InputTokens, r.CacheCreationInputTokens, r.CacheReadInputTokens,
+		r.OutputTokens, r.ContextTokens, r.CacheReadTokens,
 	)
 	return err
 }
@@ -172,21 +194,21 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 		rows *sql.Rows
 		err  error
 	)
+	const selectCols = `timestamp, session, session_id, trigger,
+		        prompt_preview, response_preview,
+		        cost_usd, duration_ms, num_turns, caller_session,
+		        turns,
+		        input_tokens, cache_creation_input_tokens, cache_read_input_tokens,
+		        output_tokens, context_tokens, cache_read_tokens`
 	if since != "" {
 		rows, err = s.db.Query(
-			`SELECT timestamp, session, session_id, trigger,
-			        prompt_preview, response_preview,
-			        cost_usd, duration_ms, num_turns, caller_session,
-			        turns
+			`SELECT `+selectCols+`
 			 FROM events WHERE timestamp > ?
 			 ORDER BY timestamp DESC`, since)
 	} else {
 		cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Format(time.RFC3339Nano)
 		rows, err = s.db.Query(
-			`SELECT timestamp, session, session_id, trigger,
-			        prompt_preview, response_preview,
-			        cost_usd, duration_ms, num_turns, caller_session,
-			        turns
+			`SELECT `+selectCols+`
 			 FROM events WHERE timestamp >= ?
 			 ORDER BY timestamp DESC`, cutoff)
 	}
@@ -206,6 +228,8 @@ func (s *Store) Query(days int, since string) ([]Row, error) {
 			&r.PromptPreview, &r.ResponsePreview,
 			&r.CostUSD, &r.DurationMS, &r.NumTurns, &r.CallerSession,
 			&turns,
+			&r.InputTokens, &r.CacheCreationInputTokens, &r.CacheReadInputTokens,
+			&r.OutputTokens, &r.ContextTokens, &r.CacheReadTokens,
 		); err != nil {
 			return nil, err
 		}
@@ -289,8 +313,10 @@ func (s *Store) Rebuild(paths []string) (int, error) {
 			timestamp, session, session_id, trigger,
 			prompt_preview, response_preview,
 			cost_usd, duration_ms, num_turns, caller_session,
-			turns
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+			turns,
+			input_tokens, cache_creation_input_tokens, cache_read_input_tokens,
+			output_tokens, context_tokens, cache_read_tokens
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return 0, err
 	}
