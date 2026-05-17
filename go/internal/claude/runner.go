@@ -38,6 +38,26 @@ type Result struct {
 	Duration  time.Duration `json:"duration_ms"`
 	NumTurns  int           `json:"num_turns"`
 	Turns     []Turn        `json:"turns"`
+
+	// Run-level token totals from the terminal "result" event. These sum
+	// across every turn in this single CLI invocation and so include
+	// repeated cache reads. Use them for billing/cost analysis; do NOT
+	// use them to size the context window.
+	InputTokens              int `json:"input_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	OutputTokens             int `json:"output_tokens,omitempty"`
+
+	// ContextTokens is the prompt size at the *end* of the run — i.e. the
+	// last assistant turn's input + cache_creation + cache_read. This is
+	// what the next resume will reload, and the right denominator for
+	// "% of context window used".
+	ContextTokens int `json:"context_tokens,omitempty"`
+
+	// CacheReadTokens is the last assistant turn's cache_read_input_tokens
+	// — the size of the cached prefix the API found. Compare to
+	// ContextTokens for the cache-hit ratio at the latest turn.
+	CacheReadTokens int `json:"cache_read_tokens,omitempty"`
 }
 
 // Runner executes Claude Code. It is immutable after construction; a single
@@ -215,25 +235,47 @@ type runState struct {
 	numTurns     int
 	durationMS   int
 	turns        []Turn
+
+	// Run-level usage from the terminal "result" event (sums across turns).
+	runUsage Usage
+
+	// Last assistant message's usage. Used to derive the *current* context
+	// size at the end of the run — the per-turn cache_read figure is the
+	// size of the cached prefix the API found, not a sum.
+	lastAssistantUsage *Usage
 }
 
 func (s *runState) toResult(responseOverride string) *Result {
-	return &Result{
+	r := &Result{
 		Response:  responseOverride,
 		SessionID: s.sessionID,
 		CostUSD:   s.costUSD,
 		Duration:  time.Duration(s.durationMS) * time.Millisecond,
 		NumTurns:  s.numTurns,
 		Turns:     s.turns,
+
+		InputTokens:              s.runUsage.InputTokens,
+		CacheCreationInputTokens: s.runUsage.CacheCreationInputTokens,
+		CacheReadInputTokens:     s.runUsage.CacheReadInputTokens,
+		OutputTokens:             s.runUsage.OutputTokens,
 	}
+	if s.lastAssistantUsage != nil {
+		u := s.lastAssistantUsage
+		r.ContextTokens = u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+		r.CacheReadTokens = u.CacheReadInputTokens
+	}
+	return r
 }
 
-// Per-string clip caps. Tool inputs are clipped per-field rather than as a
-// blob so the resulting JSON is always parseable; text turns are clipped as a
-// whole because they're free-form prose.
+// Per-string clip caps. Tool inputs/outputs are clipped per-field rather than
+// as a blob so the resulting JSON is always parseable; text turns are
+// clipped as a whole because they're free-form prose. These are tuned for
+// "I want to see what the agent did" without ballooning the event log on
+// chatty tools (Bash | cat large_file, Read on a multi-MB file, etc).
 const (
-	maxToolStringChars = 1000
-	maxTextTurnChars   = 4000
+	maxToolStringChars = 4000  // strings inside tool_use.input
+	maxToolResultChars = 8000  // tool_result.content (string form or per-block)
+	maxTextTurnChars   = 16000 // assistant text / thinking
 )
 
 func parseLine(line []byte, s *runState) {
@@ -253,31 +295,77 @@ func parseLine(line []byte, s *runState) {
 		s.costUSD = ev.TotalCostUSD
 		s.numTurns = ev.NumTurns
 		s.durationMS = ev.DurationMS
+		if ev.Usage != nil {
+			s.runUsage = *ev.Usage
+		}
 	case "assistant":
 		if ev.Message == nil {
 			return
+		}
+		// Track the per-turn usage. Attach to every assistant-produced Turn
+		// from this message so the timeline can show cache_read vs fresh
+		// input per turn; keep a pointer to the last one for ContextTokens.
+		var turnUsage *Usage
+		if ev.Message.Usage != nil {
+			u := *ev.Message.Usage
+			turnUsage = &u
+			s.lastAssistantUsage = &u
+			slog.Info("claude usage",
+				"input", u.InputTokens,
+				"cache_write", u.CacheCreationInputTokens,
+				"cache_read", u.CacheReadInputTokens,
+				"output", u.OutputTokens)
 		}
 		for _, b := range ev.Message.Content {
 			switch b.Type {
 			case "tool_use":
 				input := decodeAndClipToolInput(b.Input, maxToolStringChars)
-				s.turns = append(s.turns, Turn{Type: "tool", Name: b.Name, Input: input})
-				slog.Info("claude tool", "name", b.Name, "input", truncate(toolInputPreview(input), 200))
+				s.turns = append(s.turns, Turn{
+					Type:      "tool",
+					Name:      b.Name,
+					Input:     input,
+					ToolUseID: b.ID,
+					Usage:     turnUsage,
+				})
+				slog.Info("claude tool", "id", b.ID, "name", b.Name, "input", truncate(toolInputPreview(input), 200))
 			case "text":
 				if b.Text == "" {
 					continue
 				}
 				text := clipString(b.Text, maxTextTurnChars)
-				s.turns = append(s.turns, Turn{Type: "text", Text: text})
+				s.turns = append(s.turns, Turn{Type: "text", Text: text, Usage: turnUsage})
 				slog.Info("claude text", "preview", truncate(b.Text, 300))
 			case "thinking":
 				if b.Thinking == "" {
 					continue
 				}
 				text := clipString(b.Thinking, maxTextTurnChars)
-				s.turns = append(s.turns, Turn{Type: "thinking", Text: text})
+				s.turns = append(s.turns, Turn{Type: "thinking", Text: text, Usage: turnUsage})
 				slog.Info("claude thinking", "preview", truncate(b.Thinking, 300))
 			}
+		}
+	case "user":
+		// User events carry tool_result blocks (and occasionally injected
+		// user messages, which we ignore here — they have no actionable
+		// content for the run log).
+		if ev.Message == nil {
+			return
+		}
+		for _, b := range ev.Message.Content {
+			if b.Type != "tool_result" {
+				continue
+			}
+			output := decodeAndClipToolResult(b.Content, maxToolResultChars)
+			s.turns = append(s.turns, Turn{
+				Type:      "tool_result",
+				ToolUseID: b.ToolUseID,
+				Output:    output,
+				IsError:   b.IsError,
+			})
+			slog.Info("claude tool_result",
+				"id", b.ToolUseID,
+				"is_error", b.IsError,
+				"output", truncate(toolInputPreview(output), 200))
 		}
 	}
 }
@@ -290,6 +378,27 @@ func parseLine(line []byte, s *runState) {
 func decodeAndClipToolInput(raw json.RawMessage, max int) any {
 	if len(raw) == 0 {
 		return nil
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return map[string]any{"_raw": clipString(string(raw), max)}
+	}
+	return clipJSONStrings(v, max)
+}
+
+// decodeAndClipToolResult handles the two shapes tool_result.content can
+// take: a plain string (most tools, e.g. Bash stdout) or an array of typed
+// content blocks (Read returning an image, etc). Strings get clipped to max;
+// block arrays are returned with each string leaf clipped. Non-JSON falls
+// back to the raw text clipped — same defensive behaviour as the input path.
+func decodeAndClipToolResult(raw json.RawMessage, max int) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	// Tool results are most often a bare string; try that first.
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return clipString(s, max)
 	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {

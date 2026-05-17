@@ -32,6 +32,21 @@ type Event struct {
 	NumTurns        int     `json:"num_turns,omitempty"`
 	CallerSession   string  `json:"caller_session,omitempty"`
 	Turns           any     `json:"turns,omitempty"`
+
+	// Run-level token totals (sum across every turn in this CLI invocation).
+	// Useful for billing summaries; not safe for context-size estimation
+	// because cache reads double-count across turns.
+	InputTokens              int `json:"input_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	OutputTokens             int `json:"output_tokens,omitempty"`
+
+	// Final-turn snapshot: the prompt size at the end of the run
+	// (input + cache_creation + cache_read on the last assistant turn) and
+	// how much of that came from cache. Use these to size the next resume
+	// and to spot-check whether prompt caching is hitting.
+	ContextTokens   int `json:"context_tokens,omitempty"`
+	CacheReadTokens int `json:"cache_read_tokens,omitempty"`
 }
 
 type Store struct {
@@ -83,17 +98,23 @@ func (s *Store) Append(e Event) error {
 
 func timelineRow(e Event) timeline.Row {
 	return timeline.Row{
-		Timestamp:       e.Timestamp,
-		Session:         e.Session,
-		SessionID:       e.SessionID,
-		Trigger:         e.Trigger,
-		PromptPreview:   e.PromptPreview,
-		ResponsePreview: e.ResponsePreview,
-		CostUSD:         e.CostUSD,
-		DurationMS:      e.DurationMS,
-		NumTurns:        e.NumTurns,
-		CallerSession:   e.CallerSession,
-		Turns:           e.Turns,
+		Timestamp:                e.Timestamp,
+		Session:                  e.Session,
+		SessionID:                e.SessionID,
+		Trigger:                  e.Trigger,
+		PromptPreview:            e.PromptPreview,
+		ResponsePreview:          e.ResponsePreview,
+		CostUSD:                  e.CostUSD,
+		DurationMS:               e.DurationMS,
+		NumTurns:                 e.NumTurns,
+		CallerSession:            e.CallerSession,
+		Turns:                    e.Turns,
+		InputTokens:              e.InputTokens,
+		CacheCreationInputTokens: e.CacheCreationInputTokens,
+		CacheReadInputTokens:     e.CacheReadInputTokens,
+		OutputTokens:             e.OutputTokens,
+		ContextTokens:            e.ContextTokens,
+		CacheReadTokens:          e.CacheReadTokens,
 	}
 }
 

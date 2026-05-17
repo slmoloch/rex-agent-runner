@@ -83,16 +83,22 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 	}
 
 	ev := events.Event{
-		Session:         sessionTarget,
-		SessionID:       newID,
-		Trigger:         trigger,
-		PromptPreview:   truncate(prompt, 200),
-		ResponsePreview: truncate(response, 500),
-		CostUSD:         result.CostUSD,
-		DurationMS:      int(result.Duration.Milliseconds()),
-		NumTurns:        result.NumTurns,
-		CallerSession:   callerSession,
-		Turns:           result.Turns,
+		Session:                  sessionTarget,
+		SessionID:                newID,
+		Trigger:                  trigger,
+		PromptPreview:            truncate(prompt, 200),
+		ResponsePreview:          truncate(response, 500),
+		CostUSD:                  result.CostUSD,
+		DurationMS:               int(result.Duration.Milliseconds()),
+		NumTurns:                 result.NumTurns,
+		CallerSession:            callerSession,
+		Turns:                    result.Turns,
+		InputTokens:              result.InputTokens,
+		CacheCreationInputTokens: result.CacheCreationInputTokens,
+		CacheReadInputTokens:     result.CacheReadInputTokens,
+		OutputTokens:             result.OutputTokens,
+		ContextTokens:            result.ContextTokens,
+		CacheReadTokens:          result.CacheReadTokens,
 	}
 	if err := d.events.Append(ev); err != nil {
 		slog.Error("events append", "err", err)

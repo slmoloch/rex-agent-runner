@@ -166,6 +166,241 @@ func TestParseLine_ThinkingTurnIsCapturedAndClipped(t *testing.T) {
 	}
 }
 
+// User events carry tool_result content blocks. They become Turn entries
+// with type=="tool_result", paired to the originating tool_use by
+// ToolUseID. Long outputs are clipped the same way text is.
+func TestParseLine_UserToolResultIsCaptured(t *testing.T) {
+	long := strings.Repeat("o", maxToolResultChars*2)
+	line := mustMarshal(t, map[string]any{
+		"type": "user",
+		"message": map[string]any{
+			"content": []any{
+				map[string]any{
+					"type":        "tool_result",
+					"tool_use_id": "toolu_123",
+					"content":     long,
+					"is_error":    false,
+				},
+			},
+		},
+	})
+
+	var s runState
+	parseLine(line, &s)
+
+	if len(s.turns) != 1 {
+		t.Fatalf("want 1 turn, got %d", len(s.turns))
+	}
+	tr := s.turns[0]
+	if tr.Type != "tool_result" || tr.ToolUseID != "toolu_123" {
+		t.Fatalf("bad turn: %+v", tr)
+	}
+	out, ok := tr.Output.(string)
+	if !ok {
+		t.Fatalf("output should be a clipped string, got %T", tr.Output)
+	}
+	if out == long {
+		t.Fatalf("tool_result content was not clipped")
+	}
+	if !strings.HasSuffix(out, "…") {
+		t.Fatalf("clipped output should end with ellipsis")
+	}
+}
+
+// Some tools (Read on an image, etc) return a list of content blocks
+// instead of a bare string. Block-array shape must survive parsing with
+// string leaves clipped, not turned into a stringified blob.
+func TestParseLine_UserToolResultBlockArrayShape(t *testing.T) {
+	line := mustMarshal(t, map[string]any{
+		"type": "user",
+		"message": map[string]any{
+			"content": []any{
+				map[string]any{
+					"type":        "tool_result",
+					"tool_use_id": "toolu_img",
+					"content": []any{
+						map[string]any{"type": "text", "text": "summary"},
+						map[string]any{
+							"type": "image",
+							"source": map[string]any{
+								"type":       "base64",
+								"media_type": "image/png",
+								"data":       "ABCDEFG",
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	var s runState
+	parseLine(line, &s)
+	if len(s.turns) != 1 {
+		t.Fatalf("want 1 turn, got %d", len(s.turns))
+	}
+	if _, ok := s.turns[0].Output.([]any); !ok {
+		t.Fatalf("multimodal output should remain a slice, got %T", s.turns[0].Output)
+	}
+}
+
+// Errored tool results flow through with IsError=true so downstream layers
+// (the timeline UI, debugging tools) can flag them.
+func TestParseLine_UserToolResultErrorFlagPropagates(t *testing.T) {
+	line := mustMarshal(t, map[string]any{
+		"type": "user",
+		"message": map[string]any{
+			"content": []any{
+				map[string]any{
+					"type":        "tool_result",
+					"tool_use_id": "toolu_bad",
+					"content":     "ENOENT",
+					"is_error":    true,
+				},
+			},
+		},
+	})
+
+	var s runState
+	parseLine(line, &s)
+	if len(s.turns) != 1 || !s.turns[0].IsError {
+		t.Fatalf("is_error should propagate, got: %+v", s.turns)
+	}
+}
+
+// User events that aren't tool results (injected user messages mid-run)
+// should not produce turns — the run log is a record of agent activity.
+func TestParseLine_UserNonToolResultIgnored(t *testing.T) {
+	line := mustMarshal(t, map[string]any{
+		"type": "user",
+		"message": map[string]any{
+			"content": []any{
+				map[string]any{"type": "text", "text": "user injected this"},
+			},
+		},
+	})
+
+	var s runState
+	parseLine(line, &s)
+	if len(s.turns) != 0 {
+		t.Fatalf("user.text should be ignored, got: %+v", s.turns)
+	}
+}
+
+// Assistant events carry per-turn usage. Every Turn produced from that
+// message should get a pointer to the same usage block so the timeline can
+// show cache_read vs fresh input next to each turn.
+func TestParseLine_AssistantUsageAttachedToTurns(t *testing.T) {
+	line := mustMarshal(t, map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"content": []any{
+				map[string]any{"type": "text", "text": "hello"},
+				map[string]any{
+					"type":  "tool_use",
+					"id":    "toolu_xyz",
+					"name":  "Bash",
+					"input": map[string]any{"command": "ls"},
+				},
+			},
+			"usage": map[string]any{
+				"input_tokens":                42,
+				"cache_creation_input_tokens": 0,
+				"cache_read_input_tokens":     1000,
+				"output_tokens":               12,
+			},
+		},
+	})
+
+	var s runState
+	parseLine(line, &s)
+	if len(s.turns) != 2 {
+		t.Fatalf("want 2 turns, got %d", len(s.turns))
+	}
+	for i, tr := range s.turns {
+		if tr.Usage == nil {
+			t.Fatalf("turn %d has nil Usage", i)
+		}
+		if tr.Usage.CacheReadInputTokens != 1000 {
+			t.Fatalf("turn %d wrong usage: %+v", i, tr.Usage)
+		}
+	}
+	// Both turns must point at the same Usage so a downstream consumer
+	// doesn't see one-per-message rendered as duplicate budget.
+	if s.turns[0].Usage != s.turns[1].Usage {
+		t.Fatalf("turns from the same assistant message should share *Usage")
+	}
+	// tool_use.id must be plumbed through so tool_result can be paired.
+	if s.turns[1].ToolUseID != "toolu_xyz" {
+		t.Fatalf("tool turn missing id: %+v", s.turns[1])
+	}
+}
+
+// ContextTokens / CacheReadTokens come from the *last* assistant turn,
+// not from result.usage (which double-counts cache reads). Run-level
+// totals (InputTokens, etc) come from the result event.
+func TestRunState_TotalsAndContextTokens(t *testing.T) {
+	first := mustMarshal(t, map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"content": []any{
+				map[string]any{"type": "text", "text": "first"},
+			},
+			"usage": map[string]any{
+				"input_tokens":                100,
+				"cache_creation_input_tokens": 5000,
+				"cache_read_input_tokens":     0,
+				"output_tokens":               50,
+			},
+		},
+	})
+	second := mustMarshal(t, map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"content": []any{
+				map[string]any{"type": "text", "text": "second"},
+			},
+			"usage": map[string]any{
+				"input_tokens":                20,
+				"cache_creation_input_tokens": 0,
+				"cache_read_input_tokens":     5100,
+				"output_tokens":               80,
+			},
+		},
+	})
+	result := mustMarshal(t, map[string]any{
+		"type":           "result",
+		"result":         "done",
+		"session_id":     "sess",
+		"total_cost_usd": 0.01,
+		"num_turns":      2,
+		"duration_ms":    1234,
+		"usage": map[string]any{
+			"input_tokens":                120,
+			"cache_creation_input_tokens": 5000,
+			"cache_read_input_tokens":     5100,
+			"output_tokens":               130,
+		},
+	})
+
+	var s runState
+	parseLine(first, &s)
+	parseLine(second, &s)
+	parseLine(result, &s)
+
+	r := s.toResult(s.responseText)
+	if r.InputTokens != 120 || r.OutputTokens != 130 {
+		t.Fatalf("run totals: %+v", r)
+	}
+	// last turn (second): 20 + 0 + 5100 = 5120
+	if r.ContextTokens != 5120 {
+		t.Fatalf("ContextTokens = %d, want 5120", r.ContextTokens)
+	}
+	if r.CacheReadTokens != 5100 {
+		t.Fatalf("CacheReadTokens = %d, want 5100", r.CacheReadTokens)
+	}
+}
+
 func mustMarshal(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)
