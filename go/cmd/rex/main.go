@@ -76,7 +76,60 @@ User channel (called by agents):
   user file <path> [caption]      Upload <path> as a Telegram attachment (not inline)
 
 Other:
-  version                          Show version, commit, and build info`
+  version                          Show version, commit, and build info
+
+Run 'rex <command> --help' (or '-h') for command-specific usage.`
+
+const initUsage = `Usage: rex init
+
+Scaffold workspace/ with agent.md and memory.md in the current directory,
+record this directory as the active rex project, and run interactive
+config setup.`
+
+const serveUsage = `Usage: rex serve
+
+Run the daemon in the foreground (no process manager). Logs are written
+to <project>/logs and mirrored to stderr.`
+
+const daemonControlUsage = `Usage: rex <start|stop|restart|status>
+
+Install/start, stop, restart, or check the rex daemon. Uses launchd on
+macOS and systemd --user on Linux.`
+
+const logsUsage = `Usage: rex logs [-f]
+
+Print the last 50 lines of each daemon log file under <project>/logs.
+Use -f to follow new output like 'tail -f'.`
+
+const configUsageMsg = `Usage: rex config [subcommand]
+
+No subcommand: show config and daemon status.
+
+Subcommands:
+  setup                  Interactive configuration
+  show                   Show config (no daemon status)
+  start|stop|restart|status   Daemon control (aliases for 'rex <verb>')
+  logs [-f]              Show daemon logs`
+
+const skillsUsageMsg = `Usage: rex skills [list]
+
+  list (default)         List workspace skills`
+
+const timelineUsage = `Usage: rex timeline <stats|rebuild|clear>
+
+  stats                  Show event-log statistics
+  rebuild                Rebuild the timeline DB from JSONL audit logs
+  clear                  Clear the events DB (JSONL audit log untouched)`
+
+const sessionUsage = `Usage: rex session <reset|list|gc>
+
+  reset                  Reset the main session (fresh on next message)
+  list                   List tracked sessions
+  gc                     No-op; gc runs in the daemon on a 30m schedule`
+
+const versionUsageMsg = `Usage: rex version
+
+Print rex version, commit, and build info.`
 
 func main() {
 	if err := run(); err != nil {
@@ -107,12 +160,24 @@ func run() error {
 		fmt.Println(usage)
 		return nil
 	case "init":
+		if helpRequested(args) {
+			fmt.Println(initUsage)
+			return nil
+		}
 		return initflow.Run(bufio.NewReader(os.Stdin), os.Stdout)
 	case "serve":
+		if helpRequested(args) {
+			fmt.Println(serveUsage)
+			return nil
+		}
 		return runServe(ctx)
 	case "config":
 		return runConfig(args)
 	case "start", "stop", "restart", "status":
+		if helpRequested(args) {
+			fmt.Println(daemonControlUsage)
+			return nil
+		}
 		return runDaemonControl(cmd)
 	case "logs":
 		return runLogs(args)
@@ -123,6 +188,10 @@ func run() error {
 	case "session":
 		return runSession(ctx, args)
 	case "dispatch":
+		if helpRequested(args) {
+			fmt.Println(dispatchcmd.Usage)
+			return nil
+		}
 		cfg, err := configcmd.LoadConfig()
 		if err != nil {
 			return err
@@ -131,6 +200,11 @@ func run() error {
 	case "callback":
 		return runCallback(args)
 	case "user":
+		// Help can be answered without config; defer LoadConfig so help works
+		// before 'rex init'.
+		if helpRequested(args) {
+			return usercmd.Run(ctx, nil, workspace.Paths{}, args)
+		}
 		cfg, err := configcmd.LoadConfig()
 		if err != nil {
 			return err
@@ -138,6 +212,10 @@ func run() error {
 		ws := workspace.New(mustWorkspaceDir(cfg))
 		return usercmd.Run(ctx, cfg, ws, args)
 	case "version", "-v", "--version":
+		if helpRequested(args) {
+			fmt.Println(versionUsageMsg)
+			return nil
+		}
 		printVersion(os.Stdout)
 		return nil
 	}
@@ -145,6 +223,22 @@ func run() error {
 	fmt.Println(usage)
 	os.Exit(1)
 	return nil
+}
+
+// isHelp reports whether s is one of the accepted help flags.
+func isHelp(s string) bool {
+	return s == "-h" || s == "--help" || s == "help"
+}
+
+// helpRequested returns true when any of args is a help flag. Subcommand
+// dispatchers may also call isHelp directly on the first arg.
+func helpRequested(args []string) bool {
+	for _, a := range args {
+		if isHelp(a) {
+			return true
+		}
+	}
+	return false
 }
 
 func initLogging() {
@@ -179,14 +273,26 @@ func runConfig(args []string) error {
 		fmt.Println()
 		return runDaemonControl("status")
 	}
+	if isHelp(args[0]) {
+		fmt.Println(configUsageMsg)
+		return nil
+	}
 	switch args[0] {
 	case "setup":
+		if helpRequested(args[1:]) {
+			fmt.Println("Usage: rex config setup\n\nInteractive configuration (writes <project>/config.json).")
+			return nil
+		}
 		pd, err := configcmd.ProjectDir()
 		if err != nil {
 			return err
 		}
 		return configcmd.Setup(bufio.NewReader(os.Stdin), os.Stdout, pd)
 	case "show":
+		if helpRequested(args[1:]) {
+			fmt.Println("Usage: rex config show\n\nShow current config with secrets masked.")
+			return nil
+		}
 		cfg, err := configcmd.LoadConfig()
 		if err != nil {
 			return err
@@ -194,6 +300,10 @@ func runConfig(args []string) error {
 		configcmd.Show(os.Stdout, cfg)
 		return nil
 	case "start", "stop", "restart", "status":
+		if helpRequested(args[1:]) {
+			fmt.Println(daemonControlUsage)
+			return nil
+		}
 		return runDaemonControl(args[0])
 	case "logs":
 		return runLogs(args[1:])
@@ -241,6 +351,10 @@ func runDaemonControl(verb string) error {
 func runLogs(args []string) error {
 	follow := false
 	for _, a := range args {
+		if isHelp(a) {
+			fmt.Println(logsUsage)
+			return nil
+		}
 		if a == "-f" {
 			follow = true
 		}
@@ -253,17 +367,25 @@ func runLogs(args []string) error {
 }
 
 func runSkills(args []string) error {
-	cfg, err := configcmd.LoadConfig()
-	if err != nil {
-		return err
-	}
-	ws := workspace.New(mustWorkspaceDir(cfg))
 	sub := "list"
 	if len(args) > 0 {
 		sub = args[0]
 	}
+	if isHelp(sub) {
+		fmt.Println(skillsUsageMsg)
+		return nil
+	}
 	switch sub {
 	case "list", "":
+		if helpRequested(args[1:]) {
+			fmt.Println("Usage: rex skills list\n\nList workspace skills (name + description).")
+			return nil
+		}
+		cfg, err := configcmd.LoadConfig()
+		if err != nil {
+			return err
+		}
+		ws := workspace.New(mustWorkspaceDir(cfg))
 		list, err := skills.List(ws.SkillsDir)
 		if err != nil {
 			return err
@@ -277,17 +399,36 @@ func runSkills(args []string) error {
 			fmt.Printf("  %-20s %s\n", s.Name, s.Description)
 		}
 		return nil
-	case "help", "-h", "--help":
-		fmt.Println("Usage: rex skills [list]")
-		return nil
 	}
 	return fmt.Errorf("unknown skills command: %s", sub)
 }
 
 func runTimeline(args []string) error {
 	if len(args) == 0 {
-		fmt.Println("Usage: rex timeline <stats|rebuild|clear>")
+		fmt.Println(timelineUsage)
 		return nil
+	}
+	if isHelp(args[0]) {
+		fmt.Println(timelineUsage)
+		return nil
+	}
+	subHelp := helpRequested(args[1:])
+	switch args[0] {
+	case "rebuild":
+		if subHelp {
+			fmt.Println("Usage: rex timeline rebuild\n\nRebuild the timeline DB from JSONL audit logs.")
+			return nil
+		}
+	case "stats":
+		if subHelp {
+			fmt.Println("Usage: rex timeline stats\n\nShow event-log statistics (count, sessions, time range, cost).")
+			return nil
+		}
+	case "clear":
+		if subHelp {
+			fmt.Println("Usage: rex timeline clear\n\nClear the events DB. JSONL audit log is untouched.")
+			return nil
+		}
 	}
 	cfg, err := configcmd.LoadConfig()
 	if err != nil {
@@ -341,16 +482,38 @@ func runTimeline(args []string) error {
 }
 
 func runSession(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		fmt.Println(sessionUsage)
+		return nil
+	}
+	if isHelp(args[0]) {
+		fmt.Println(sessionUsage)
+		return nil
+	}
+	subHelp := helpRequested(args[1:])
+	switch args[0] {
+	case "reset":
+		if subHelp {
+			fmt.Println("Usage: rex session reset\n\nReset the main session — a fresh session starts on the next message.")
+			return nil
+		}
+	case "list":
+		if subHelp {
+			fmt.Println("Usage: rex session list\n\nList tracked sessions (id, name, last-activity, main marker).")
+			return nil
+		}
+	case "gc":
+		if subHelp {
+			fmt.Println("Usage: rex session gc\n\nNo-op; the daemon runs gc on a 30m schedule.")
+			return nil
+		}
+	}
 	cfg, err := configcmd.LoadConfig()
 	if err != nil {
 		return err
 	}
 	ws := workspace.New(mustWorkspaceDir(cfg))
 
-	if len(args) == 0 {
-		fmt.Println("Usage: rex session <reset|list|gc>")
-		return nil
-	}
 	switch args[0] {
 	case "reset":
 		tl, err := timeline.Open(filepath.Join(ws.Root, "events.db"))
@@ -412,6 +575,32 @@ func runSession(ctx context.Context, args []string) error {
 }
 
 func runCallback(args []string) error {
+	if len(args) == 0 {
+		fmt.Println(callbackUsage)
+		return nil
+	}
+	if isHelp(args[0]) {
+		fmt.Println(callbackUsage)
+		return nil
+	}
+	subHelp := helpRequested(args[1:])
+	switch args[0] {
+	case "list":
+		if subHelp {
+			fmt.Println("Usage: rex callback list\n\nList all registered callbacks.")
+			return nil
+		}
+	case "remove":
+		if subHelp {
+			fmt.Println("Usage: rex callback remove <id>\n\nRemove a callback by id.")
+			return nil
+		}
+	case "create":
+		if subHelp {
+			fmt.Println(callbackCreateUsage)
+			return nil
+		}
+	}
 	cfg, err := configcmd.LoadConfig()
 	if err != nil {
 		return err
@@ -419,10 +608,6 @@ func runCallback(args []string) error {
 	ws := workspace.New(mustWorkspaceDir(cfg))
 	store := callback.NewStore(ws.CallbacksFile)
 
-	if len(args) == 0 {
-		fmt.Println(callbackUsage)
-		return nil
-	}
 	switch args[0] {
 	case "list":
 		cbs := store.List()
@@ -448,9 +633,6 @@ func runCallback(args []string) error {
 			return errors.New("Usage: rex callback remove <id>")
 		}
 		return store.Remove(args[1])
-	case "help", "-h", "--help":
-		fmt.Println(callbackUsage)
-		return nil
 	}
 	return fmt.Errorf("unknown callback command: %s", args[0])
 }
@@ -472,9 +654,25 @@ Options:
 
 --at formats: "HH:MM", "YYYY-MM-DD HH:MM", "+5m", "+2h"`
 
+const callbackCreateUsage = `Usage: rex callback create "<prompt>" --schedule "<cron>" | --at "<when>" [options]
+
+Create a callback that runs a prompt later — recurring (--schedule) or once (--at).
+
+Options:
+  --name <id>           Custom callback ID
+  --session <target>    Session to run in: "main" or "new" (default: new)
+  --command "<cmd>"     Bash command to run before the prompt. Non-zero exit
+                        skips the prompt; zero-exit stdout is appended to it.
+
+--at formats: "HH:MM", "YYYY-MM-DD HH:MM", "+5m", "+2h"`
+
 func createCallback(store *callback.Store, args []string) error {
 	if len(args) == 0 {
 		return errors.New(`Usage: rex callback create "<prompt>" --schedule "<cron>" | --at "<when>" [options]`)
+	}
+	if isHelp(args[0]) {
+		fmt.Println(callbackCreateUsage)
+		return nil
 	}
 	prompt := args[0]
 	args = args[1:]
