@@ -32,11 +32,73 @@ Notes:
     shown inline. To deliver text content inline, use '--file' with 'user text' or
     'user rich-text'.`
 
+const textSubUsage = `Usage: rex user text <message>
+       rex user text --file <path>
+
+Send an inline Telegram message formatted as Markdown V1
+(*bold*, _italic_, ` + "`code`" + `, [link](url)). --file reads the body from a path.`
+
+const richTextSubUsage = `Usage: rex user rich-text <message>
+       rex user rich-text --file <path>
+
+Send an inline Telegram message formatted as HTML
+(<b>, <i>, <code>, <a>, ...). --file reads the body from a path.`
+
+const voiceSubUsage = `Usage: rex user voice <message>
+
+Synthesize <message> via OpenAI TTS and deliver it as a Telegram voice note.
+Exits with code 2 when voice is not configured.`
+
+const fileSubUsage = `Usage: rex user file <path> [caption]
+
+Upload <path> as a Telegram document attachment. Contents are NOT inlined —
+use 'rex user text --file' / 'rex user rich-text --file' for inline text.`
+
+// isHelp reports whether s is one of the accepted help flags.
+func isHelp(s string) bool {
+	return s == "-h" || s == "--help" || s == "help"
+}
+
+func subHelpRequested(args []string) bool {
+	for _, a := range args {
+		if isHelp(a) {
+			return true
+		}
+	}
+	return false
+}
+
 // Run dispatches the user subcommand. Returns a non-nil error for failures;
 // special ExitUnavailable is returned when voice is configured-off (exit 2).
 func Run(ctx context.Context, cfg *config.Config, _ workspace.Paths, args []string) error {
 	if len(args) == 0 {
 		return errors.New(Usage)
+	}
+	if isHelp(args[0]) {
+		fmt.Println(Usage)
+		return nil
+	}
+	switch args[0] {
+	case "text":
+		if subHelpRequested(args[1:]) {
+			fmt.Println(textSubUsage)
+			return nil
+		}
+	case "rich-text":
+		if subHelpRequested(args[1:]) {
+			fmt.Println(richTextSubUsage)
+			return nil
+		}
+	case "voice":
+		if subHelpRequested(args[1:]) {
+			fmt.Println(voiceSubUsage)
+			return nil
+		}
+	case "file":
+		if subHelpRequested(args[1:]) {
+			fmt.Println(fileSubUsage)
+			return nil
+		}
 	}
 	tg, err := newTelegram(cfg)
 	if err != nil {
