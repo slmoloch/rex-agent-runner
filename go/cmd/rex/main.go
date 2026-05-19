@@ -164,11 +164,17 @@ func run() error {
 			fmt.Println(initUsage)
 			return nil
 		}
+		if err := rejectExtraArgs("init", args, initUsage); err != nil {
+			return err
+		}
 		return initflow.Run(bufio.NewReader(os.Stdin), os.Stdout)
 	case "serve":
 		if helpRequested(args) {
 			fmt.Println(serveUsage)
 			return nil
+		}
+		if err := rejectExtraArgs("serve", args, serveUsage); err != nil {
+			return err
 		}
 		return runServe(ctx)
 	case "config":
@@ -177,6 +183,9 @@ func run() error {
 		if helpRequested(args) {
 			fmt.Println(daemonControlUsage)
 			return nil
+		}
+		if err := rejectExtraArgs(cmd, args, daemonControlUsage); err != nil {
+			return err
 		}
 		return runDaemonControl(cmd)
 	case "logs":
@@ -216,6 +225,9 @@ func run() error {
 			fmt.Println(versionUsageMsg)
 			return nil
 		}
+		if err := rejectExtraArgs("version", args, versionUsageMsg); err != nil {
+			return err
+		}
 		printVersion(os.Stdout)
 		return nil
 	}
@@ -239,6 +251,19 @@ func helpRequested(args []string) bool {
 		}
 	}
 	return false
+}
+
+// rejectExtraArgs errors if args contains anything other than help flags.
+// Use in subcommands that take no arguments — silently dropping a typo
+// like `rex session reet` would be worse than failing loudly.
+func rejectExtraArgs(cmd string, args []string, usage string) error {
+	for _, a := range args {
+		if isHelp(a) {
+			continue
+		}
+		return fmt.Errorf("unknown argument for '%s': %s\n%s", cmd, a, usage)
+	}
+	return nil
 }
 
 func initLogging() {
@@ -279,9 +304,13 @@ func runConfig(args []string) error {
 	}
 	switch args[0] {
 	case "setup":
+		setupUsage := "Usage: rex config setup\n\nInteractive configuration (writes <project>/config.json)."
 		if helpRequested(args[1:]) {
-			fmt.Println("Usage: rex config setup\n\nInteractive configuration (writes <project>/config.json).")
+			fmt.Println(setupUsage)
 			return nil
+		}
+		if err := rejectExtraArgs("config setup", args[1:], setupUsage); err != nil {
+			return err
 		}
 		pd, err := configcmd.ProjectDir()
 		if err != nil {
@@ -289,9 +318,13 @@ func runConfig(args []string) error {
 		}
 		return configcmd.Setup(bufio.NewReader(os.Stdin), os.Stdout, pd)
 	case "show":
+		showUsage := "Usage: rex config show\n\nShow current config with secrets masked."
 		if helpRequested(args[1:]) {
-			fmt.Println("Usage: rex config show\n\nShow current config with secrets masked.")
+			fmt.Println(showUsage)
 			return nil
+		}
+		if err := rejectExtraArgs("config show", args[1:], showUsage); err != nil {
+			return err
 		}
 		cfg, err := configcmd.LoadConfig()
 		if err != nil {
@@ -303,6 +336,9 @@ func runConfig(args []string) error {
 		if helpRequested(args[1:]) {
 			fmt.Println(daemonControlUsage)
 			return nil
+		}
+		if err := rejectExtraArgs("config "+args[0], args[1:], daemonControlUsage); err != nil {
+			return err
 		}
 		return runDaemonControl(args[0])
 	case "logs":
@@ -357,7 +393,9 @@ func runLogs(args []string) error {
 		}
 		if a == "-f" {
 			follow = true
+			continue
 		}
+		return fmt.Errorf("unknown argument for 'logs': %s\n%s", a, logsUsage)
 	}
 	cfg, err := configcmd.LoadConfig()
 	if err != nil {
@@ -377,9 +415,13 @@ func runSkills(args []string) error {
 	}
 	switch sub {
 	case "list", "":
+		listUsage := "Usage: rex skills list\n\nList workspace skills (name + description)."
 		if helpRequested(args[1:]) {
-			fmt.Println("Usage: rex skills list\n\nList workspace skills (name + description).")
+			fmt.Println(listUsage)
 			return nil
+		}
+		if err := rejectExtraArgs("skills list", args[1:], listUsage); err != nil {
+			return err
 		}
 		cfg, err := configcmd.LoadConfig()
 		if err != nil {
@@ -419,15 +461,24 @@ func runTimeline(args []string) error {
 			fmt.Println("Usage: rex timeline rebuild\n\nRebuild the timeline DB from JSONL audit logs.")
 			return nil
 		}
+		if err := rejectExtraArgs("timeline rebuild", args[1:], timelineUsage); err != nil {
+			return err
+		}
 	case "stats":
 		if subHelp {
 			fmt.Println("Usage: rex timeline stats\n\nShow event-log statistics (count, sessions, time range, cost).")
 			return nil
 		}
+		if err := rejectExtraArgs("timeline stats", args[1:], timelineUsage); err != nil {
+			return err
+		}
 	case "clear":
 		if subHelp {
 			fmt.Println("Usage: rex timeline clear\n\nClear the events DB. JSONL audit log is untouched.")
 			return nil
+		}
+		if err := rejectExtraArgs("timeline clear", args[1:], timelineUsage); err != nil {
+			return err
 		}
 	}
 	cfg, err := configcmd.LoadConfig()
@@ -497,15 +548,24 @@ func runSession(ctx context.Context, args []string) error {
 			fmt.Println("Usage: rex session reset\n\nReset the main session — a fresh session starts on the next message.")
 			return nil
 		}
+		if err := rejectExtraArgs("session reset", args[1:], sessionUsage); err != nil {
+			return err
+		}
 	case "list":
 		if subHelp {
 			fmt.Println("Usage: rex session list\n\nList tracked sessions (id, name, last-activity, main marker).")
 			return nil
 		}
+		if err := rejectExtraArgs("session list", args[1:], sessionUsage); err != nil {
+			return err
+		}
 	case "gc":
 		if subHelp {
 			fmt.Println("Usage: rex session gc\n\nNo-op; the daemon runs gc on a 30m schedule.")
 			return nil
+		}
+		if err := rejectExtraArgs("session gc", args[1:], sessionUsage); err != nil {
+			return err
 		}
 	}
 	cfg, err := configcmd.LoadConfig()
@@ -590,10 +650,16 @@ func runCallback(args []string) error {
 			fmt.Println("Usage: rex callback list\n\nList all registered callbacks.")
 			return nil
 		}
+		if err := rejectExtraArgs("callback list", args[1:], callbackUsage); err != nil {
+			return err
+		}
 	case "remove":
 		if subHelp {
 			fmt.Println("Usage: rex callback remove <id>\n\nRemove a callback by id.")
 			return nil
+		}
+		if len(args) > 2 {
+			return fmt.Errorf("unknown argument for 'callback remove': %s\n%s", args[2], callbackUsage)
 		}
 	case "create":
 		if subHelp {
@@ -679,26 +745,28 @@ func createCallback(store *callback.Store, args []string) error {
 
 	var schedule, at, name, command, sessionTarget string
 	for i := 0; i < len(args); i++ {
+		flag := args[i]
+		switch flag {
+		case "--schedule", "--at", "--name", "--command", "--session":
+		default:
+			return fmt.Errorf("unknown flag for 'callback create': %s\n%s", flag, callbackCreateUsage)
+		}
 		if i+1 >= len(args) {
-			break
+			return fmt.Errorf("flag %s requires a value\n%s", flag, callbackCreateUsage)
 		}
 		v := args[i+1]
-		switch args[i] {
+		i++
+		switch flag {
 		case "--schedule":
 			schedule = v
-			i++
 		case "--at":
 			at = v
-			i++
 		case "--name":
 			name = v
-			i++
 		case "--command":
 			command = v
-			i++
 		case "--session":
 			sessionTarget = v
-			i++
 		}
 	}
 	if (schedule == "") == (at == "") {
