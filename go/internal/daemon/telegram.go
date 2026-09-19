@@ -89,6 +89,12 @@ func (d *Daemon) originFor(m *telegram.Message) origin {
 }
 
 func (d *Daemon) handleUpdate(ctx context.Context, u telegram.Update) {
+	// Membership updates carry no message and are authorized on their own
+	// actor, so they come before the message allow-list check.
+	if u.MyChatMember != nil {
+		d.handleMyChatMember(ctx, u.MyChatMember)
+		return
+	}
 	if !d.authorized(u) {
 		return
 	}

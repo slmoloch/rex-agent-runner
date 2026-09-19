@@ -91,12 +91,26 @@ session, its own history, and its own daily recycle. Replies land back in
 the topic they were asked in — final turn text, `rex user text|rich-text|
 voice|file`, typing indicators and scheduled callbacks alike.
 
-To use it: turn on **Topics** in your supergroup, add the bot, and set
-`telegram_chat_id` to the supergroup's id (`rex config setup`). Group
-privacy mode has to be off — in BotFather, `/setprivacy` → *Disable* — or
-the bot only ever sees commands and direct replies. The allow-list still
-applies: only the user IDs in `allowed_user_ids` are answered, wherever they
-write from. DMs keep working exactly as before and use the `main` session.
+To use it: turn on **Topics** in your supergroup and add the bot. There is
+no per-topic setup — the bot is added to the group once and sees every
+topic in it. When someone on the allow-list adds it, rex introduces itself
+and, if `telegram_chat_id` isn't set yet, registers that chat as its default
+on the spot; no digging the id out of `getUpdates` by hand. An existing
+`telegram_chat_id` is never silently replaced — rex just prints the new
+chat's id and leaves the switch to you (`rex config setup`).
+
+Topics themselves need no registration at all: a topic is picked up from its
+creation notice, or from the first message sent in it.
+
+The one thing rex can't do for you is group privacy mode, which Telegram
+only exposes in BotFather: Bot Settings → *Group Privacy* → *Turn off*, then
+remove and re-add the bot (the setting is applied when it joins). With
+privacy on, the bot only ever receives commands and direct replies. Making
+the bot an admin works too — admins see every message regardless.
+
+The allow-list still applies: only the user IDs in `allowed_user_ids` are
+answered, wherever they write from. DMs keep working exactly as before and
+use the `main` session.
 
 Work the agent spawns out of a topic stays attached to it: a session started
 with `rex dispatch new` from inside a topic reports its results back into

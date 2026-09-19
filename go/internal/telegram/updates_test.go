@@ -133,3 +133,63 @@ func TestTopicNameSources(t *testing.T) {
 		t.Fatal("forum_topic_edited should be a service message")
 	}
 }
+
+func TestMyChatMemberDecodes(t *testing.T) {
+	var u Update
+	raw := `{
+		"update_id": 7,
+		"my_chat_member": {
+			"chat": {"id": -1001234567890, "type": "supergroup", "title": "Team", "is_forum": true},
+			"from": {"id": 5, "username": "me"},
+			"date": 1760000000,
+			"old_chat_member": {"status": "left", "user": {"id": 99, "username": "rexbot"}},
+			"new_chat_member": {"status": "member", "user": {"id": 99, "username": "rexbot"}}
+		}
+	}`
+	if err := json.Unmarshal([]byte(raw), &u); err != nil {
+		t.Fatalf("decode update: %v", err)
+	}
+	if u.MyChatMember == nil {
+		t.Fatal("my_chat_member did not decode")
+	}
+	ev := u.MyChatMember
+	if ev.Chat.ID != -1001234567890 || !ev.Chat.IsForum || !ev.Chat.IsGroup() {
+		t.Fatalf("chat = %+v", ev.Chat)
+	}
+	if ev.From == nil || ev.From.ID != 5 {
+		t.Fatalf("from = %+v", ev.From)
+	}
+	if !ev.NewChatMember.Joined() {
+		t.Fatal("status member should count as joined")
+	}
+	if ev.OldChatMember.Joined() {
+		t.Fatal("status left should not count as joined")
+	}
+}
+
+func TestChatMemberJoinedStatuses(t *testing.T) {
+	for _, status := range []string{"creator", "administrator", "member"} {
+		if !(ChatMember{Status: status}).Joined() {
+			t.Fatalf("%q should count as joined", status)
+		}
+	}
+	// A restricted member may be muted, and left/kicked are gone.
+	for _, status := range []string{"restricted", "left", "kicked", ""} {
+		if (ChatMember{Status: status}).Joined() {
+			t.Fatalf("%q should not count as joined", status)
+		}
+	}
+}
+
+func TestIsGroup(t *testing.T) {
+	for _, c := range []Chat{{Type: "group"}, {Type: "supergroup"}} {
+		if !c.IsGroup() {
+			t.Fatalf("%q should be a group", c.Type)
+		}
+	}
+	for _, c := range []Chat{{Type: "private"}, {Type: "channel"}, {}} {
+		if c.IsGroup() {
+			t.Fatalf("%q should not be a group", c.Type)
+		}
+	}
+}

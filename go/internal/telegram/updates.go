@@ -14,6 +14,39 @@ import (
 type Update struct {
 	UpdateID int64    `json:"update_id"`
 	Message  *Message `json:"message,omitempty"`
+
+	// MyChatMember reports a change to the bot's own membership in a chat —
+	// it is how the bot learns it was added to (or removed from) a group.
+	// Telegram sends it without being asked for; only the `chat_member`
+	// updates about *other* users need allowed_updates.
+	MyChatMember *ChatMemberUpdated `json:"my_chat_member,omitempty"`
+}
+
+// ChatMemberUpdated is the payload of a my_chat_member update: who changed
+// the membership, in which chat, and what the new status is.
+type ChatMemberUpdated struct {
+	Chat          Chat       `json:"chat"`
+	From          *User      `json:"from,omitempty"`
+	Date          int64      `json:"date"`
+	OldChatMember ChatMember `json:"old_chat_member"`
+	NewChatMember ChatMember `json:"new_chat_member"`
+}
+
+// ChatMember carries the part of Telegram's ChatMember union rex acts on.
+type ChatMember struct {
+	Status string `json:"status"` // creator | administrator | member | restricted | left | kicked
+	User   User   `json:"user"`
+}
+
+// Joined reports whether the status means the bot is now in the chat and can
+// post. Restricted members may be muted, so they don't count.
+func (m ChatMember) Joined() bool {
+	switch m.Status {
+	case "creator", "administrator", "member":
+		return true
+	default:
+		return false
+	}
 }
 
 type Message struct {
@@ -59,6 +92,12 @@ type Chat struct {
 	Type    string `json:"type,omitempty"`  // "private" | "group" | "supergroup" | "channel"
 	Title   string `json:"title,omitempty"` // groups and supergroups only
 	IsForum bool   `json:"is_forum,omitempty"`
+}
+
+// IsGroup reports whether the chat is a group or supergroup — the kinds of
+// chat a bot is added to, as opposed to a DM or a channel.
+func (c Chat) IsGroup() bool {
+	return c.Type == "group" || c.Type == "supergroup"
 }
 
 // ForumTopicCreated is the service message posted when a topic is opened.
