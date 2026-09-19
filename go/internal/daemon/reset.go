@@ -60,5 +60,44 @@ func (d *Daemon) dailyResetLoop(ctx context.Context) {
 			defer cancel()
 			_, _ = d.runInSession(cctx, initPrompt, session.Main, "daily-reset", "")
 		}()
+
+		d.resetTopicSessions(ctx)
 	}
+}
+
+// resetTopicSessions recycles every forum-topic session at the daily reset,
+// the same way the main session is recycled. Topics that were active in the
+// last day get the heads-up prompt first; dormant ones are just cleared, so
+// a forum with many topics doesn't cost one LLM call per topic per night.
+// No seeding turn is run: the next message in a topic starts its session
+// with the topic context attached.
+func (d *Daemon) resetTopicSessions(ctx context.Context) {
+	for target, topic := range d.sessions.Topics() {
+		if topic.SessionID == "" {
+			continue
+		}
+		if d.sessions.IsRunning(topic.SessionID) {
+			slog.Info("daily reset: topic session is active, skipping", "topic", target)
+			continue
+		}
+		if recentlyActive(topic.LastActivity) {
+			func() {
+				cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+				defer cancel()
+				_, _ = d.runInSession(cctx, prepareResetPrompt, target, "daily-reset-prepare", "")
+			}()
+		}
+		d.sessions.Reset(target)
+		slog.Info("daily reset: topic session reset", "topic", target, "name", topic.Name)
+	}
+}
+
+// recentlyActive reports whether an RFC3339 timestamp is within the last day.
+// An unparseable or missing stamp counts as stale.
+func recentlyActive(stamp string) bool {
+	t, err := time.Parse(time.RFC3339Nano, stamp)
+	if err != nil {
+		return false
+	}
+	return time.Since(t) < 24*time.Hour
 }

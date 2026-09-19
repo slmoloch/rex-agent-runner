@@ -95,6 +95,20 @@
     letter-spacing: 0.3px;
     flex-shrink: 0;
   }
+  .topic-badge {
+    font-size: 9px;
+    font-weight: 700;
+    color: #a371f7;
+    background: #2d2140;
+    padding: 1px 5px;
+    border-radius: 8px;
+    margin-left: 6px;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
   .lane-label .dot {
     width: 8px; height: 8px;
     border-radius: 50%;
@@ -526,7 +540,8 @@
       var sid = ev.session_id;
       if (!sid) return;
       if (!sMap[sid]) {
-        sMap[sid] = { id: sid, isMain: !!(sessionInfo[sid] && sessionInfo[sid].is_main), events: [], t0: Infinity, t1: -Infinity, mainT0: null, mainT1: null };
+        var info = sessionInfo[sid] || {};
+        sMap[sid] = { id: sid, isMain: !!info.is_main, isTopic: !!info.is_topic, topicName: info.topic_name || '', threadId: info.thread_id || 0, events: [], t0: Infinity, t1: -Infinity, mainT0: null, mainT1: null };
         order.push(sid);
       }
       var s = sMap[sid];
@@ -717,7 +732,13 @@
         badge.textContent = 'main';
         div.appendChild(badge);
       }
-      div.title = s.id;
+      if (s.isTopic) {
+        var topicBadge = document.createElement('span');
+        topicBadge.className = 'topic-badge';
+        topicBadge.textContent = s.topicName || ('topic ' + s.threadId);
+        div.appendChild(topicBadge);
+      }
+      div.title = s.id + (s.isTopic ? '\ntopic:' + s.threadId + (s.topicName ? ' — ' + s.topicName : '') : '');
       list.appendChild(div);
     });
 

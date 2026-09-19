@@ -20,7 +20,10 @@ const apiRoot = "https://api.telegram.org"
 type Client struct {
 	Token  string
 	ChatID int64
-	HTTP   *http.Client
+	// ThreadID is the forum topic every send is addressed to. Zero means
+	// the chat itself (a DM, an ordinary group, or a forum's General topic).
+	ThreadID int64
+	HTTP     *http.Client
 }
 
 func New(token string, chatID int64) *Client {
@@ -29,6 +32,48 @@ func New(token string, chatID int64) *Client {
 		ChatID: chatID,
 		HTTP:   &http.Client{Timeout: 0}, // per-call ctx handles timeouts
 	}
+}
+
+// WithChat returns a copy of the client that posts to a different chat,
+// sharing the same HTTP client. The thread binding is dropped: a topic id
+// is only meaningful inside the chat it belongs to.
+func (c *Client) WithChat(chatID int64) *Client {
+	if chatID == 0 || chatID == c.ChatID {
+		return c
+	}
+	cp := *c
+	cp.ChatID = chatID
+	cp.ThreadID = 0
+	return &cp
+}
+
+// WithThread returns a copy of the client bound to a forum topic, sharing the
+// same HTTP client. Passing 0 clears the binding.
+func (c *Client) WithThread(threadID int64) *Client {
+	if threadID == c.ThreadID {
+		return c
+	}
+	cp := *c
+	cp.ThreadID = threadID
+	return &cp
+}
+
+// target fills in chat_id (plus message_thread_id when this client is bound
+// to a forum topic) on an outgoing form payload.
+func (c *Client) target(v url.Values) {
+	v.Set("chat_id", c.strChatID())
+	if c.ThreadID != 0 {
+		v.Set("message_thread_id", strconv.FormatInt(c.ThreadID, 10))
+	}
+}
+
+// targetFields is the multipart equivalent of target.
+func (c *Client) targetFields() map[string]string {
+	f := map[string]string{"chat_id": c.strChatID()}
+	if c.ThreadID != 0 {
+		f["message_thread_id"] = strconv.FormatInt(c.ThreadID, 10)
+	}
+	return f
 }
 
 func (c *Client) endpoint(method string) string {

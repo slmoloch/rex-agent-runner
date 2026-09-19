@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/slmoloch/rex-agent-runner/internal/config"
@@ -189,16 +190,35 @@ type ExitUnavailable struct{ Reason string }
 
 func (e *ExitUnavailable) Error() string { return e.Reason }
 
+// newTelegram builds the client `rex user` delivers through. The daemon
+// exports REX_TELEGRAM_CHAT_ID / REX_TELEGRAM_TOPIC_ID for the turn it is
+// running, so a message sent from inside a forum-topic session lands back in
+// that topic instead of the default chat. Outside a daemon turn (a shell by
+// hand, say) both are unset and the configured chat is used.
 func newTelegram(cfg *config.Config) (*telegram.Client, error) {
 	if cfg.TelegramBotToken == "" {
 		return nil, errors.New("telegram_bot_token not configured")
 	}
-	chat := cfg.TelegramChatID
+	chat := envInt64("REX_TELEGRAM_CHAT_ID")
+	if chat == 0 {
+		chat = cfg.TelegramChatID
+	}
 	if chat == 0 && len(cfg.AllowedUserIDs) > 0 {
 		chat = cfg.AllowedUserIDs[0]
 	}
 	if chat == 0 {
 		return nil, errors.New("no telegram_chat_id and no allowed_user_ids")
 	}
-	return telegram.New(cfg.TelegramBotToken, chat), nil
+	return telegram.New(cfg.TelegramBotToken, chat).
+		WithThread(envInt64("REX_TELEGRAM_TOPIC_ID")), nil
+}
+
+// envInt64 reads an int64 environment variable, returning 0 when unset or
+// unparseable.
+func envInt64(name string) int64 {
+	v, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(name)), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }

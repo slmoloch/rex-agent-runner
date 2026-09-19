@@ -50,8 +50,10 @@ func Setup(in *bufio.Reader, out io.Writer, projectDir string) error {
 	} else if len(cfg.AllowedUserIDs) > 0 {
 		chatDefault = strconv.FormatInt(cfg.AllowedUserIDs[0], 10)
 	}
+	// A forum supergroup's chat id works here too: rex then runs one session
+	// per topic and replies inside the topic it was addressed in.
 	chatStr := promptString(in, out,
-		"Telegram chat ID for notifications", chatDefault, chatDefault)
+		"Telegram chat ID for notifications (a DM or a supergroup)", chatDefault, chatDefault)
 	if chatStr != "" {
 		if n, err := strconv.ParseInt(chatStr, 10, 64); err == nil {
 			cfg.TelegramChatID = n

@@ -80,21 +80,36 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	tracked := s.session.Tracked()
 	mainID := s.session.GetMainID()
+	// Sessions serving a Telegram forum topic are labelled with the topic
+	// so the dashboard shows which conversation a lane belongs to.
+	topicOf := map[string]session.Topic{}
+	for _, t := range s.session.Topics() {
+		if t.SessionID != "" {
+			topicOf[t.SessionID] = t
+		}
+	}
 	type row struct {
 		SessionID    string `json:"session_id"`
 		Name         string `json:"name,omitempty"`
 		LastActivity string `json:"last_activity,omitempty"`
 		IsMain       bool   `json:"is_main"`
 		IsRunning    bool   `json:"is_running"`
+		IsTopic      bool   `json:"is_topic,omitempty"`
+		TopicName    string `json:"topic_name,omitempty"`
+		ThreadID     int64  `json:"thread_id,omitempty"`
 	}
 	rows := make([]row, 0, len(tracked))
 	for id, t := range tracked {
+		topic, isTopic := topicOf[id]
 		rows = append(rows, row{
 			SessionID:    id,
 			Name:         t.Name,
 			LastActivity: t.LastActivity,
 			IsMain:       id == mainID,
 			IsRunning:    s.session.IsRunning(id),
+			IsTopic:      isTopic,
+			TopicName:    topic.Name,
+			ThreadID:     topic.ThreadID,
 		})
 	}
 	// Sort newest-first by last_activity.

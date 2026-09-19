@@ -31,16 +31,26 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 // gcOnce mirrors rex_gc.py:collect. A tracked session is removed iff it:
 //
 //   - is not the main session,
+//   - is not the live session of a Telegram forum topic,
 //   - is not currently running a turn,
 //   - did not recently dispatch to another still-active session,
 //   - and has no callbacks targeting it.
 func (d *Daemon) gcOnce() []string {
 	tracked := d.sessions.Tracked()
 	mainID := d.sessions.GetMainID()
+	topicIDs := make(map[string]struct{})
+	for _, t := range d.sessions.Topics() {
+		if t.SessionID != "" {
+			topicIDs[t.SessionID] = struct{}{}
+		}
+	}
 	var cleaned []string
 
 	for sid, info := range tracked {
 		if sid == mainID {
+			continue
+		}
+		if _, ok := topicIDs[sid]; ok {
 			continue
 		}
 		if d.sessions.IsRunning(sid) {
@@ -105,6 +115,10 @@ func (d *Daemon) hasCallbacks(sessionID, mainID string) bool {
 			return true
 		}
 		if target == session.Main && sessionID == mainID {
+			return true
+		}
+		// A callback aimed at a topic keeps that topic's live session alive.
+		if session.IsTopicTarget(target) && d.sessions.GetID(target) == sessionID {
 			return true
 		}
 	}
