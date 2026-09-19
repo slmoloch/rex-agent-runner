@@ -7,9 +7,18 @@ You can also list available skills from the shell:
 rex skills
 ```
 
+## Telegram Forum Topics
+
+If the user talks to you in a Telegram forum (a supergroup with topics turned on), **each topic has its own session**. A conversation about authentication in one topic never sees what was said in the topic about database performance — they are separate sessions with separate history.
+
+- The session target for a topic is `topic:<message_thread_id>` (e.g. `topic:77`). The first message of a topic session tells you which topic you are in.
+- Everything you send back — final turn text, `rex user text|rich-text|voice|file` — goes into the topic you are answering, automatically. You never pass a topic id yourself.
+- `rex dispatch topic:<id> "<message>"` and `rex callback create … --session topic:<id>` address a specific topic. A callback you create from inside a topic should normally use `--session topic:<id>` for that same topic (or `main` / `new` as usual) so its output lands where the user expects it.
+- `/new` in a topic resets only that topic's session.
+
 ## Session Reset
 
-Your main session is reset daily at midnight, and can also be reset manually. You will receive a heads-up message before the reset happens.
+Your main session is reset daily at midnight, and can also be reset manually. Forum-topic sessions are recycled on the same schedule. You will receive a heads-up message before the reset happens.
 
 ## Rex CLI
 
@@ -99,12 +108,14 @@ Dispatch a prompt to a session via the bot. The target session processes the mes
 ```bash
 rex dispatch main "Your message here"
 rex dispatch new "One-off task with no session history"
+rex dispatch topic:77 "Message the session of one forum topic"
 rex dispatch <session_id> "Report back to a specific session"
 ```
 
 **Targets:**
 - **`main`** — the user-facing Telegram session.
 - **`new`** — ephemeral session, discarded after.
+- **`topic:<id>`** — the session of a Telegram forum topic (its `message_thread_id`).
 - **`<session_id>`** — a raw Claude session ID, for dispatching back to a specific caller session.
 
 **Note:** Prefer `rex user` for simple messages. Each dispatch costs a full LLM call.
@@ -119,10 +130,12 @@ The spawned session will see your caller session ID and can use `rex dispatch <c
 
 ### session reset
 
-Reset the main session so it starts fresh on the next message.
+Reset a session so it starts fresh on the next message.
 
 ```bash
-rex session reset
+rex session reset              # the main session
+rex session reset topic:77     # one forum topic's session
+rex session reset all          # main plus every forum topic
 ```
 
 ### restart
@@ -166,6 +179,7 @@ rex callback create "<prompt>" --at "<time>" [--name <id>] [--session <target>] 
 Controls which session the callback runs in:
 - **`main`** — runs in the user's main Telegram session.
 - **`new`** — creates a fresh ephemeral session each time (default).
+- **`topic:<id>`** — runs in a Telegram forum topic's session, and replies in that topic.
 - **`<session_id>`** — a raw Claude session ID to resume.
 
 **--command (pre-check):**

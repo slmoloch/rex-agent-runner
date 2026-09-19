@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -61,22 +62,52 @@ func (d *Daemon) authorized(u telegram.Update) bool {
 	return ok
 }
 
+// origin is the conversation a Telegram message belongs to: the chat, the
+// forum topic inside it (0 when there is none), the session target serving
+// that conversation, and a Telegram client already addressed to it. Every
+// forum topic gets its own session, so two topics in the same supergroup
+// never share conversation history.
+type origin struct {
+	chatID   int64
+	threadID int64
+	target   string // "main" or "topic:<thread id>"
+	tg       *telegram.Client
+}
+
+// originFor resolves the conversation a message belongs to and refreshes the
+// topic binding on the way through, so out-of-band replies (callbacks,
+// dispatches) can find their way back into the topic later.
+func (d *Daemon) originFor(m *telegram.Message) origin {
+	o := origin{chatID: m.Chat.ID, target: session.Main}
+	if threadID := m.ThreadID(); threadID != 0 {
+		o.threadID = threadID
+		o.target = session.TopicTarget(threadID)
+		d.sessions.TouchTopic(o.target, m.Chat.ID, threadID, m.TopicName())
+	}
+	o.tg = d.tg.WithChat(m.Chat.ID).WithThread(o.threadID)
+	return o
+}
+
 func (d *Daemon) handleUpdate(ctx context.Context, u telegram.Update) {
 	if !d.authorized(u) {
 		return
 	}
 	m := u.Message
+	o := d.originFor(m)
+	if m.IsForumService() {
+		// Topic created / renamed / closed / reopened: originFor already
+		// recorded whatever the service message told us. Nothing to answer.
+		slog.Info("forum topic event", "chat", m.Chat.ID, "topic", o.target, "name", m.TopicName())
+		return
+	}
 	if cmd := m.Command(); cmd != "" {
 		switch cmd {
 		case "start":
-			_ = d.tg.SendMessage(ctx,
-				"Hello! I'm a Claude Code bot. Send me a message and I'll process it through Claude Code.\n\n"+
-					"/new - Start a fresh conversation\n"+
-					"/restart - Restart the bot daemon")
+			_ = o.tg.SendMessage(ctx, d.startMessage(o))
 		case "new":
-			d.handleNewConversation(ctx)
+			d.handleNewConversation(ctx, o)
 		case "restart":
-			_ = d.tg.SendMessage(ctx, "Restarting…")
+			_ = o.tg.SendMessage(ctx, "Restarting…")
 			slog.Info("restart requested via telegram", "user", m.From.ID)
 			// Exit so the process manager (launchd / systemd) relaunches us.
 			go func() {
@@ -87,44 +118,89 @@ func (d *Daemon) handleUpdate(ctx context.Context, u telegram.Update) {
 		return
 	}
 	if m.Voice != nil {
-		d.handleVoice(ctx, m)
+		d.handleVoice(ctx, m, o)
 		return
 	}
 	if attached := pickFile(m); attached.fileID != "" {
-		d.handleFile(ctx, m, attached)
+		d.handleFile(ctx, m, attached, o)
 		return
 	}
 	if m.Text != "" {
-		d.handleText(ctx, m)
+		d.handleText(ctx, m, o)
 	}
 }
 
-func (d *Daemon) handleNewConversation(ctx context.Context) {
-	mainID := d.sessions.GetMainID()
-	if mainID != "" {
+// startMessage tailors /start to where it was sent: inside a forum topic it
+// says so, because the session the user is talking to is that topic's.
+func (d *Daemon) startMessage(o origin) string {
+	msg := "Hello! I'm a Claude Code bot. Send me a message and I'll process it through Claude Code.\n\n"
+	if o.threadID != 0 {
+		msg += "This topic has its own session — conversations in other topics stay separate.\n\n"
+	}
+	msg += "/new - Start a fresh conversation" + scopeSuffix(o) + "\n" +
+		"/restart - Restart the bot daemon"
+	return msg
+}
+
+// scopeSuffix labels a per-conversation action with the topic it applies to.
+func scopeSuffix(o origin) string {
+	if o.threadID == 0 {
+		return ""
+	}
+	return " in this topic"
+}
+
+// handleNewConversation resets the session behind the conversation /new was
+// sent in — the main session in a DM, or just that one topic's session in a
+// forum. Other topics are untouched.
+func (d *Daemon) handleNewConversation(ctx context.Context, o origin) {
+	if d.sessions.GetID(o.target) != "" {
 		func() {
 			cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 			defer cancel()
-			_, _ = d.runInSession(cctx, prepareResetPrompt, session.Main, "reset-prepare", "")
+			_, _ = d.runInSessionFrom(cctx, prepareResetPrompt, o.target, "reset-prepare", "", &o)
 		}()
 	}
-	d.sessions.ResetMain()
-	_ = d.tg.SendMessage(ctx, "Session reset. Send a message to start fresh.")
+	d.sessions.Reset(o.target)
+	_ = o.tg.SendMessage(ctx, "Session reset"+scopeSuffix(o)+". Send a message to start fresh.")
 
 	today := time.Now().Format("2006-01-02")
 	initPrompt := "Your session has been reset (user requested via /new). Today's date is " + today + "."
+	if o.threadID != 0 {
+		initPrompt += " " + topicContextLine(d.topicLabel(o.target), o.threadID)
+	}
 	func() {
 		cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
-		_, _ = d.runInSession(cctx, initPrompt, session.Main, "new-reset", "")
+		_, _ = d.runInSessionFrom(cctx, initPrompt, o.target, "new-reset", "", &o)
 	}()
 }
 
-func (d *Daemon) handleText(ctx context.Context, m *telegram.Message) {
-	done := d.keepTyping(ctx)
+// topicContextLine tells a freshly started session which forum topic it is
+// serving, so the agent can scope its work (and its callbacks) accordingly.
+func topicContextLine(name string, threadID int64) string {
+	line := "You are running in a Telegram forum topic"
+	if name != "" {
+		line += " named " + strconv.Quote(name)
+	}
+	line += fmt.Sprintf(" (session target %s). This topic has its own session; "+
+		"replies you send go back into it automatically.", session.TopicTarget(threadID))
+	return line
+}
+
+// topicLabel is the human name of a topic when Telegram has told us one.
+func (d *Daemon) topicLabel(target string) string {
+	if t, ok := d.sessions.TopicFor(target); ok {
+		return t.Name
+	}
+	return ""
+}
+
+func (d *Daemon) handleText(ctx context.Context, m *telegram.Message, o origin) {
+	done := d.keepTyping(ctx, o.tg)
 	defer done()
 
-	resp, used := d.runInSession(ctx, m.Text, session.Main, "telegram", "")
+	resp, used := d.runInSessionFrom(ctx, d.withTopicContext(m.Text, o), o.target, "telegram", "", &o)
 	if used {
 		return
 	}
@@ -132,14 +208,23 @@ func (d *Daemon) handleText(ctx context.Context, m *telegram.Message) {
 		slog.Warn("claude produced empty response; sending fallback", "trigger", "telegram")
 		resp = emptyResponseFallback
 	}
-	if err := d.tg.SendMessageMarkdownChunks(ctx, resp); err != nil {
+	if err := o.tg.SendMessageMarkdownChunks(ctx, resp); err != nil {
 		slog.Error("send message failed", "err", err)
 	}
 }
 
-func (d *Daemon) handleVoice(ctx context.Context, m *telegram.Message) {
+// withTopicContext prefixes the first prompt of a topic session with a note
+// naming the topic. Later turns resume the same session and don't need it.
+func (d *Daemon) withTopicContext(prompt string, o origin) string {
+	if o.threadID == 0 || d.sessions.GetID(o.target) != "" {
+		return prompt
+	}
+	return topicContextLine(d.topicLabel(o.target), o.threadID) + "\n\n" + prompt
+}
+
+func (d *Daemon) handleVoice(ctx context.Context, m *telegram.Message, o origin) {
 	if d.voice == nil {
-		_ = d.tg.SendMessage(ctx,
+		_ = o.tg.SendMessage(ctx,
 			"I got your voice message, but voice support is off: the OpenAI API key is not configured.")
 		return
 	}
@@ -150,16 +235,16 @@ func (d *Daemon) handleVoice(ctx context.Context, m *telegram.Message) {
 	ts := time.Now().Format("20060102-150405")
 	src := filepath.Join(d.ws.Inbox, fmt.Sprintf("%s-voice-%s.ogg", ts, m.Voice.FileUniqueID))
 
-	tgFile, err := d.tg.GetFile(ctx, m.Voice.FileID)
+	tgFile, err := o.tg.GetFile(ctx, m.Voice.FileID)
 	if err != nil {
 		slog.Error("telegram getFile", "err", err)
-		_ = d.tg.SendMessage(ctx, "Sorry, I couldn't download that voice message.")
+		_ = o.tg.SendMessage(ctx, "Sorry, I couldn't download that voice message.")
 		return
 	}
-	data, err := d.tg.Download(ctx, tgFile.FilePath)
+	data, err := o.tg.Download(ctx, tgFile.FilePath)
 	if err != nil {
 		slog.Error("telegram download", "err", err)
-		_ = d.tg.SendMessage(ctx, "Sorry, I couldn't download that voice message.")
+		_ = o.tg.SendMessage(ctx, "Sorry, I couldn't download that voice message.")
 		return
 	}
 	if err := os.WriteFile(src, data, 0o644); err != nil {
@@ -167,17 +252,17 @@ func (d *Daemon) handleVoice(ctx context.Context, m *telegram.Message) {
 		return
 	}
 
-	done := d.keepTyping(ctx)
+	done := d.keepTyping(ctx, o.tg)
 	defer done()
 
 	transcript, err := d.voice.Transcribe(ctx, src)
 	if err != nil {
 		slog.Error("transcribe failed", "err", err)
-		_ = d.tg.SendMessage(ctx, "Sorry, I couldn't understand that audio.")
+		_ = o.tg.SendMessage(ctx, "Sorry, I couldn't understand that audio.")
 		return
 	}
 	if transcript == "" {
-		_ = d.tg.SendMessage(ctx, "Sorry, I couldn't understand that audio.")
+		_ = o.tg.SendMessage(ctx, "Sorry, I couldn't understand that audio.")
 		return
 	}
 	slog.Info("voice transcript", "preview", truncate(transcript, 300))
@@ -191,25 +276,25 @@ func (d *Daemon) handleVoice(ctx context.Context, m *telegram.Message) {
 		prompt += "\nCaption: " + caption
 	}
 
-	resp, used := d.runInSession(ctx, prompt, session.Main, "telegram-voice", "")
+	resp, used := d.runInSessionFrom(ctx, d.withTopicContext(prompt, o), o.target, "telegram-voice", "", &o)
 	if used {
 		return
 	}
 	if resp == "" {
 		slog.Warn("claude produced empty response; sending fallback", "trigger", "telegram-voice")
-		_ = d.tg.SendMessage(ctx, emptyResponseFallback)
+		_ = o.tg.SendMessage(ctx, emptyResponseFallback)
 		return
 	}
 
 	replyPath := filepath.Join(d.ws.Inbox, fmt.Sprintf("%s-reply-%s.ogg", ts, m.Voice.FileUniqueID))
 	if err := d.voice.Synthesize(ctx, resp, replyPath); err != nil {
 		slog.Error("synth failed, falling back to text", "err", err)
-		_ = d.tg.SendMessageMarkdownChunks(ctx, resp)
+		_ = o.tg.SendMessageMarkdownChunks(ctx, resp)
 		return
 	}
-	if err := d.tg.SendVoice(ctx, replyPath); err != nil {
+	if err := o.tg.SendVoice(ctx, replyPath); err != nil {
 		slog.Error("send voice failed", "err", err)
-		_ = d.tg.SendMessageMarkdownChunks(ctx, resp)
+		_ = o.tg.SendMessageMarkdownChunks(ctx, resp)
 	}
 }
 
@@ -246,21 +331,21 @@ func pickFile(m *telegram.Message) attachedFile {
 	return attachedFile{}
 }
 
-func (d *Daemon) handleFile(ctx context.Context, m *telegram.Message, a attachedFile) {
+func (d *Daemon) handleFile(ctx context.Context, m *telegram.Message, a attachedFile, o origin) {
 	if err := os.MkdirAll(d.ws.Inbox, 0o755); err != nil {
 		slog.Error("inbox mkdir", "err", err)
 		return
 	}
-	tgFile, err := d.tg.GetFile(ctx, a.fileID)
+	tgFile, err := o.tg.GetFile(ctx, a.fileID)
 	if err != nil {
 		slog.Error("getFile", "err", err)
-		_ = d.tg.SendMessage(ctx, "Sorry, I couldn't download that file.")
+		_ = o.tg.SendMessage(ctx, "Sorry, I couldn't download that file.")
 		return
 	}
-	data, err := d.tg.Download(ctx, tgFile.FilePath)
+	data, err := o.tg.Download(ctx, tgFile.FilePath)
 	if err != nil {
 		slog.Error("download", "err", err)
-		_ = d.tg.SendMessage(ctx, "Sorry, I couldn't download that file.")
+		_ = o.tg.SendMessage(ctx, "Sorry, I couldn't download that file.")
 		return
 	}
 	ts := time.Now().Format("20060102-150405")
@@ -288,10 +373,10 @@ func (d *Daemon) handleFile(ctx context.Context, m *telegram.Message, a attached
 	}
 	prompt := strings.Join(lines, "\n")
 
-	done := d.keepTyping(ctx)
+	done := d.keepTyping(ctx, o.tg)
 	defer done()
 
-	resp, used := d.runInSession(ctx, prompt, session.Main, "telegram-file", "")
+	resp, used := d.runInSessionFrom(ctx, d.withTopicContext(prompt, o), o.target, "telegram-file", "", &o)
 	if used {
 		return
 	}
@@ -299,19 +384,19 @@ func (d *Daemon) handleFile(ctx context.Context, m *telegram.Message, a attached
 		slog.Warn("claude produced empty response; sending fallback", "trigger", "telegram-file")
 		resp = emptyResponseFallback
 	}
-	if err := d.tg.SendMessageMarkdownChunks(ctx, resp); err != nil {
+	if err := o.tg.SendMessageMarkdownChunks(ctx, resp); err != nil {
 		slog.Error("send message failed", "err", err)
 	}
 }
 
-// keepTyping periodically sends the "typing" chat action until the returned
-// stop function is called.
-func (d *Daemon) keepTyping(ctx context.Context) func() {
+// keepTyping periodically sends the "typing" chat action to the chat (and
+// forum topic) tg is addressed to, until the returned stop function is called.
+func (d *Daemon) keepTyping(ctx context.Context, tg *telegram.Client) func() {
 	stop := make(chan struct{})
 	go func() {
 		t := time.NewTicker(4 * time.Second)
 		defer t.Stop()
-		if err := d.tg.SendChatAction(ctx, "typing"); err != nil {
+		if err := tg.SendChatAction(ctx, "typing"); err != nil {
 			return
 		}
 		for {
@@ -321,7 +406,7 @@ func (d *Daemon) keepTyping(ctx context.Context) func() {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				_ = d.tg.SendChatAction(ctx, "typing")
+				_ = tg.SendChatAction(ctx, "typing")
 			}
 		}
 	}()

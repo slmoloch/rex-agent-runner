@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/slmoloch/rex-agent-runner/internal/claude"
@@ -42,6 +43,14 @@ func calledRexUser(turns []claude.Turn) bool {
 // caller whether to suppress forwarding the response to the user (set when
 // the agent emitted NoReplyMarker in its final text).
 func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigger, callerSession string) (string, bool) {
+	return d.runInSessionFrom(ctx, prompt, sessionTarget, trigger, callerSession, nil)
+}
+
+// runInSessionFrom is runInSession with an explicit Telegram origin. Turns
+// started by an incoming message pass the origin they came from; turns
+// started elsewhere (callbacks, dispatches) pass nil and the origin is
+// recovered from the stored topic binding.
+func (d *Daemon) runInSessionFrom(ctx context.Context, prompt, sessionTarget, trigger, callerSession string, o *origin) (string, bool) {
 	sessionID := d.sessions.Resolve(sessionTarget)
 
 	if sessionID != "" {
@@ -51,6 +60,7 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 		Prompt:       prompt,
 		SessionID:    sessionID,
 		SystemPrompt: d.systemPrompt,
+		Env:          d.replyEnv(sessionTarget, sessionID, callerSession, o),
 	})
 	if sessionID != "" {
 		d.sessions.MarkStopped(sessionID)
@@ -62,18 +72,14 @@ func (d *Daemon) runInSession(ctx context.Context, prompt, sessionTarget, trigge
 
 	newID := result.SessionID
 
-	// Update the main session pointer only if it still points at the one we
-	// just ran — a concurrent /new or daily reset could have wiped it, and
-	// we must not resurrect the old id.
-	if sessionTarget == session.Main && newID != "" {
-		d.sessions.SetMainID(newID, sessionID)
+	// Update the conversation's session pointer (main or one topic's) only
+	// if it still points at the one we just ran — a concurrent /new or daily
+	// reset could have wiped it, and we must not resurrect the old id.
+	if newID != "" && (sessionTarget == session.Main || session.IsTopicTarget(sessionTarget)) {
+		d.sessions.SetID(sessionTarget, newID, sessionID)
 	}
 	if newID != "" {
-		name := ""
-		if sessionTarget == session.Main {
-			name = session.Main
-		}
-		d.sessions.Register(newID, name)
+		d.sessions.Register(newID, d.sessionLabel(sessionTarget))
 	}
 
 	suppressReply := strings.Contains(result.Response, NoReplyMarker) || calledRexUser(result.Turns)
@@ -117,6 +123,58 @@ func (d *Daemon) RunJob(ctx context.Context, prompt, jobName, sessionTarget, cal
 	}
 	resp, _ := d.runInSession(ctx, prompt, sessionTarget, jobName, callerSession)
 	return resp, nil
+}
+
+// sessionLabel is the display name recorded for a session: "main", the forum
+// topic's title (falling back to its target) or "" for ad-hoc sessions.
+func (d *Daemon) sessionLabel(sessionTarget string) string {
+	switch {
+	case sessionTarget == session.Main:
+		return session.Main
+	case session.IsTopicTarget(sessionTarget):
+		if t, ok := d.sessions.TopicFor(sessionTarget); ok && t.Name != "" {
+			return t.Name + " (" + sessionTarget + ")"
+		}
+		return sessionTarget
+	default:
+		return ""
+	}
+}
+
+// replyEnv tells the rex CLI invoked from inside the turn (`rex user …`)
+// which Telegram chat and forum topic to deliver to, so an agent working in
+// a topic answers in that topic instead of the default chat.
+//
+// The origin is taken from the incoming message when there is one. Otherwise
+// it comes from the stored topic binding, looked up by target, by the
+// resumed session id (a dispatch naming a raw id) and finally by the caller
+// session — so a helper session spawned with `rex dispatch new` out of a
+// topic still reports back into that topic.
+func (d *Daemon) replyEnv(sessionTarget, sessionID, callerSession string, o *origin) []string {
+	var chatID, threadID int64
+	switch {
+	case o != nil:
+		chatID, threadID = o.chatID, o.threadID
+	default:
+		t, ok := d.sessions.TopicFor(sessionTarget)
+		if !ok {
+			_, t, ok = d.sessions.TopicForSessionID(sessionID)
+		}
+		if !ok {
+			_, t, ok = d.sessions.TopicForSessionID(callerSession)
+		}
+		if ok {
+			chatID, threadID = t.ChatID, t.ThreadID
+		}
+	}
+	var env []string
+	if chatID != 0 {
+		env = append(env, "REX_TELEGRAM_CHAT_ID="+strconv.FormatInt(chatID, 10))
+	}
+	if threadID != 0 {
+		env = append(env, "REX_TELEGRAM_TOPIC_ID="+strconv.FormatInt(threadID, 10))
+	}
+	return env
 }
 
 func truncate(s string, n int) string {

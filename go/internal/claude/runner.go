@@ -28,6 +28,11 @@ type Options struct {
 	SystemPrompt string        // used only when SessionID is empty
 	IdleTimeout  time.Duration // 0 => DefaultIdleTimeout
 	MaxTimeout   time.Duration // 0 => unlimited
+
+	// Env holds extra "KEY=value" entries appended to the subprocess
+	// environment. rex uses it to tell `rex user` / `rex dispatch` which
+	// Telegram chat and forum topic the turn belongs to.
+	Env []string
 }
 
 // Result is everything the caller gets back from a run.
@@ -109,6 +114,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	if opts.SessionID != "" {
 		cmd.Env = append(cmd.Env, "REX_SESSION_ID="+opts.SessionID)
 	}
+	cmd.Env = append(cmd.Env, opts.Env...)
 
 	// Kill the whole process group on timeout so tools spawned by Claude die too.
 	setPgid(cmd)

@@ -24,6 +24,7 @@ Dispatch a prompt to a session via the bot.
 Sessions:
   main             The user-facing Telegram session
   new              Ephemeral session (discarded after)
+  topic:<id>       The session of a Telegram forum topic (its message_thread_id)
   <session_id>     A raw Claude session ID (for agent-to-agent callbacks)`
 
 func Run(ctx context.Context, cfg *config.Config, args []string) error {

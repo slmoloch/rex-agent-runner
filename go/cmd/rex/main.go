@@ -59,8 +59,8 @@ Timeline:
   timeline stats                   Show event-log statistics
 
 Sessions:
-  session reset                    Reset the main session
-  session list                     List tracked sessions
+  session reset [<target>]         Reset the main, a topic, or all sessions
+  session list                     List tracked sessions and forum topics
   session gc                       Run gc pass
   dispatch <session> <message>     Dispatch a prompt via the bot
 
@@ -121,11 +121,16 @@ const timelineUsage = `Usage: rex timeline <stats|rebuild|clear>
   rebuild                Rebuild the timeline DB from JSONL audit logs
   clear                  Clear the events DB (JSONL audit log untouched)`
 
-const sessionUsage = `Usage: rex session <reset|list|gc>
+const sessionUsage = `Usage: rex session <reset [<target>]|list|gc>
 
-  reset                  Reset the main session (fresh on next message)
-  list                   List tracked sessions
-  gc                     No-op; gc runs in the daemon on a 30m schedule`
+  reset [<target>]       Reset a session (fresh on next message in it)
+  list                   List tracked sessions and Telegram forum topics
+  gc                     No-op; gc runs in the daemon on a 30m schedule
+
+Reset targets:
+  main (default)         The main Telegram session
+  topic:<thread id>      One Telegram forum topic's session
+  all                    The main session and every forum topic session`
 
 const versionUsageMsg = `Usage: rex version
 
@@ -545,15 +550,15 @@ func runSession(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "reset":
 		if subHelp {
-			fmt.Println("Usage: rex session reset\n\nReset the main session — a fresh session starts on the next message.")
+			fmt.Println(sessionResetUsage)
 			return nil
 		}
-		if err := rejectExtraArgs("session reset", args[1:], sessionUsage); err != nil {
-			return err
+		if len(args) > 2 {
+			return fmt.Errorf("session reset takes at most one target\n%s", sessionUsage)
 		}
 	case "list":
 		if subHelp {
-			fmt.Println("Usage: rex session list\n\nList tracked sessions (id, name, last-activity, main marker).")
+			fmt.Println("Usage: rex session list\n\nList tracked sessions (id, name, last-activity, main marker)\nand the Telegram forum topics bound to them.")
 			return nil
 		}
 		if err := rejectExtraArgs("session list", args[1:], sessionUsage); err != nil {
@@ -584,21 +589,25 @@ func runSession(ctx context.Context, args []string) error {
 		evStore := events.NewStore(ws.EventsDir, ws.LegacyEvents, tl)
 		seStore := session.NewStore(ws.SessionsFile, evStore)
 
-		mainID := seStore.GetMainID()
-		if mainID != "" {
-			fmt.Println("Preparing session for reset…")
-			runner := &claude.Runner{Bin: claude.FindBin(cfg.ClaudeBin), Workdir: ws.Root}
-			cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-			defer cancel()
-			if _, err := runner.Run(cctx, claude.Options{
-				Prompt:    "Heads up: your session is about to be reset.",
-				SessionID: mainID,
-			}); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: preparation prompt failed: %v\n", err)
-			}
+		target := session.Main
+		if len(args) > 1 {
+			target = args[1]
 		}
-		seStore.ResetMain()
-		fmt.Println("Main session reset. Will start fresh on next message.")
+		targets, err := resetTargets(seStore, target)
+		if err != nil {
+			return err
+		}
+		runner := &claude.Runner{Bin: claude.FindBin(cfg.ClaudeBin), Workdir: ws.Root}
+		for _, t := range targets {
+			if id := seStore.GetID(t); id != "" {
+				fmt.Printf("Preparing session %s for reset…\n", t)
+				if err := prepareForReset(ctx, runner, id); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: preparation prompt failed: %v\n", err)
+				}
+			}
+			seStore.Reset(t)
+			fmt.Printf("Session %s reset. Will start fresh on next message.\n", t)
+		}
 		return nil
 	case "list":
 		seStore := session.NewStore(ws.SessionsFile, events.NewStore(ws.EventsDir, ws.LegacyEvents, nil))
@@ -606,6 +615,7 @@ func runSession(ctx context.Context, args []string) error {
 		mainID := seStore.GetMainID()
 		if len(tracked) == 0 {
 			fmt.Println("No tracked sessions.")
+			printTopics(seStore)
 			return nil
 		}
 		ids := make([]string, 0, len(tracked))
@@ -626,12 +636,83 @@ func runSession(ctx context.Context, args []string) error {
 			}
 			fmt.Printf("  %s%s%s  last_activity=%s\n", sid, tag, main, info.LastActivity)
 		}
+		printTopics(seStore)
 		return nil
 	case "gc":
 		fmt.Println("GC is run by the daemon on a 30m schedule; no action taken here.")
 		return nil
 	}
 	return fmt.Errorf("unknown session command: %s", args[0])
+}
+
+const sessionResetUsage = `Usage: rex session reset [<target>]
+
+Reset a session — a fresh one starts on the next message in it.
+
+Targets:
+  main (default)         The main Telegram session
+  topic:<thread id>      One Telegram forum topic's session
+  all                    The main session and every forum topic session`
+
+// resetTargets expands a user-supplied reset target into the session targets
+// to clear. "all" covers the main session plus every known forum topic.
+func resetTargets(se *session.Store, target string) ([]string, error) {
+	switch {
+	case target == "all":
+		targets := []string{session.Main}
+		for t := range se.Topics() {
+			targets = append(targets, t)
+		}
+		sort.Strings(targets[1:])
+		return targets, nil
+	case target == session.Main:
+		return []string{session.Main}, nil
+	case session.IsTopicTarget(target):
+		if _, ok := session.ParseTopicTarget(target); !ok {
+			return nil, fmt.Errorf("invalid topic target: %s (expected topic:<thread id>)", target)
+		}
+		return []string{target}, nil
+	default:
+		return nil, fmt.Errorf("unknown reset target: %s\n%s", target, sessionResetUsage)
+	}
+}
+
+// prepareForReset gives a session a heads-up turn before it is discarded.
+func prepareForReset(ctx context.Context, runner *claude.Runner, sessionID string) error {
+	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	_, err := runner.Run(cctx, claude.Options{
+		Prompt:    "Heads up: your session is about to be reset.",
+		SessionID: sessionID,
+	})
+	return err
+}
+
+// printTopics lists the Telegram forum topics rex knows about, each with the
+// session currently serving it.
+func printTopics(se *session.Store) {
+	topics := se.Topics()
+	if len(topics) == 0 {
+		return
+	}
+	targets := make([]string, 0, len(topics))
+	for t := range topics {
+		targets = append(targets, t)
+	}
+	sort.Strings(targets)
+	fmt.Println("\nTelegram forum topics:")
+	for _, target := range targets {
+		t := topics[target]
+		name := t.Name
+		if name == "" {
+			name = "(unnamed)"
+		}
+		sid := t.SessionID
+		if sid == "" {
+			sid = "-"
+		}
+		fmt.Printf("  %s  %s  session=%s  last_activity=%s\n", target, name, sid, t.LastActivity)
+	}
 }
 
 func runCallback(args []string) error {
@@ -714,7 +795,9 @@ Commands:
 
 Options:
   --name <id>           Custom callback ID
-  --session <target>    Session to run in: "main" or "new" (default: new)
+  --session <target>    Session to run in: "main", "new", or
+                        "topic:<thread id>" for a Telegram forum topic
+                        (default: new)
   --command "<cmd>"     Bash command to run before the prompt. Non-zero exit
                         skips the prompt; zero-exit stdout is appended to it.
 
@@ -726,7 +809,9 @@ Create a callback that runs a prompt later — recurring (--schedule) or once (-
 
 Options:
   --name <id>           Custom callback ID
-  --session <target>    Session to run in: "main" or "new" (default: new)
+  --session <target>    Session to run in: "main", "new", or
+                        "topic:<thread id>" for a Telegram forum topic
+                        (default: new)
   --command "<cmd>"     Bash command to run before the prompt. Non-zero exit
                         skips the prompt; zero-exit stdout is appended to it.
 

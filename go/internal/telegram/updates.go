@@ -24,6 +24,21 @@ type Message struct {
 	Text      string `json:"text,omitempty"`
 	Caption   string `json:"caption,omitempty"`
 
+	// Forum topics. MessageThreadID identifies the topic a message belongs
+	// to inside a forum supergroup; it is also set for reply threads in
+	// ordinary groups, so IsTopicMessage is what actually distinguishes a
+	// forum topic. The General topic carries neither field.
+	MessageThreadID int64    `json:"message_thread_id,omitempty"`
+	IsTopicMessage  bool     `json:"is_topic_message,omitempty"`
+	ReplyToMessage  *Message `json:"reply_to_message,omitempty"`
+
+	// Forum service messages. Telegram posts these into the topic itself
+	// when it is created, renamed, closed or reopened.
+	ForumTopicCreated  *ForumTopicCreated  `json:"forum_topic_created,omitempty"`
+	ForumTopicEdited   *ForumTopicEdited   `json:"forum_topic_edited,omitempty"`
+	ForumTopicClosed   *ForumTopicClosed   `json:"forum_topic_closed,omitempty"`
+	ForumTopicReopened *ForumTopicReopened `json:"forum_topic_reopened,omitempty"`
+
 	Voice    *Voice    `json:"voice,omitempty"`
 	Document *Document `json:"document,omitempty"`
 	Photo    []Photo   `json:"photo,omitempty"`
@@ -40,7 +55,63 @@ type User struct {
 }
 
 type Chat struct {
-	ID int64 `json:"id"`
+	ID      int64  `json:"id"`
+	Type    string `json:"type,omitempty"`  // "private" | "group" | "supergroup" | "channel"
+	Title   string `json:"title,omitempty"` // groups and supergroups only
+	IsForum bool   `json:"is_forum,omitempty"`
+}
+
+// ForumTopicCreated is the service message posted when a topic is opened.
+type ForumTopicCreated struct {
+	Name string `json:"name"`
+}
+
+// ForumTopicEdited is the service message posted when a topic is renamed.
+// Name is empty when only the icon changed.
+type ForumTopicEdited struct {
+	Name string `json:"name,omitempty"`
+}
+
+type ForumTopicClosed struct{}
+
+type ForumTopicReopened struct{}
+
+// ThreadID returns the forum topic this message belongs to, or 0 when it is
+// not in one (a DM, an ordinary group, or the forum's General topic).
+// Reply-chain thread ids in non-forum groups deliberately return 0 — only
+// real topics get their own session.
+func (m *Message) ThreadID() int64 {
+	if m == nil || !m.IsTopicMessage {
+		return 0
+	}
+	return m.MessageThreadID
+}
+
+// TopicName returns the topic title when the message carries it: either the
+// creation/rename service message itself, or a message posted in the topic
+// whose reply-to is the topic-creation message. Returns "" when unknown —
+// the Bot API has no way to look a topic title up after the fact.
+func (m *Message) TopicName() string {
+	if m == nil {
+		return ""
+	}
+	if m.ForumTopicCreated != nil && m.ForumTopicCreated.Name != "" {
+		return m.ForumTopicCreated.Name
+	}
+	if m.ForumTopicEdited != nil && m.ForumTopicEdited.Name != "" {
+		return m.ForumTopicEdited.Name
+	}
+	if r := m.ReplyToMessage; r != nil && r.ForumTopicCreated != nil {
+		return r.ForumTopicCreated.Name
+	}
+	return ""
+}
+
+// IsForumService reports whether the message is a forum housekeeping event
+// rather than user content. These carry no text to act on.
+func (m *Message) IsForumService() bool {
+	return m != nil && (m.ForumTopicCreated != nil || m.ForumTopicEdited != nil ||
+		m.ForumTopicClosed != nil || m.ForumTopicReopened != nil)
 }
 
 type Voice struct {

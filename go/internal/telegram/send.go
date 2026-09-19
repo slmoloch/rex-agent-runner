@@ -18,7 +18,7 @@ import (
 // interpreted. Use SendMessageHTML when you want Telegram HTML rendering.
 func (c *Client) SendMessage(ctx context.Context, text string) error {
 	v := url.Values{}
-	v.Set("chat_id", c.strChatID())
+	c.target(v)
 	v.Set("text", text)
 	_, err := c.doJSON(ctx, "sendMessage", v)
 	return err
@@ -30,7 +30,7 @@ func (c *Client) SendMessage(ctx context.Context, text string) error {
 // error.
 func (c *Client) SendMessageHTML(ctx context.Context, text string) error {
 	v := url.Values{}
-	v.Set("chat_id", c.strChatID())
+	c.target(v)
 	v.Set("text", text)
 	v.Set("parse_mode", "HTML")
 	_, err := c.doJSON(ctx, "sendMessage", v)
@@ -50,7 +50,7 @@ func (c *Client) SendMessageHTML(ctx context.Context, text string) error {
 // malformed markup degrades to verbatim text instead of erroring out.
 func (c *Client) SendMessageMarkdown(ctx context.Context, text string) error {
 	v := url.Values{}
-	v.Set("chat_id", c.strChatID())
+	c.target(v)
 	v.Set("text", text)
 	v.Set("parse_mode", "Markdown")
 	_, err := c.doJSON(ctx, "sendMessage", v)
@@ -115,7 +115,7 @@ func (c *Client) SendVoice(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	fields := map[string]string{"chat_id": c.strChatID()}
+	fields := c.targetFields()
 	files := map[string]filePart{
 		"voice": {name: "voice.ogg", data: data},
 	}
@@ -129,7 +129,7 @@ func (c *Client) SendDocument(ctx context.Context, path, caption string) error {
 	if err != nil {
 		return err
 	}
-	fields := map[string]string{"chat_id": c.strChatID()}
+	fields := c.targetFields()
 	if caption != "" {
 		fields["caption"] = caption
 		fields["parse_mode"] = "HTML"
@@ -159,7 +159,7 @@ func (c *Client) SendDocument(ctx context.Context, path, caption string) error {
 // SendChatAction signals "typing" (or other action) in the chat.
 func (c *Client) SendChatAction(ctx context.Context, action string) error {
 	v := url.Values{}
-	v.Set("chat_id", c.strChatID())
+	c.target(v)
 	v.Set("action", action)
 	_, err := c.doJSON(ctx, "sendChatAction", v)
 	return err

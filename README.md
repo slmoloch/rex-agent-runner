@@ -49,6 +49,9 @@ What `rex` adds:
   messages; auxiliary sessions are tracked, listed, reset, and
   garbage-collected on a 30-minute schedule. Sessions auto-recycle so
   last week's noise doesn't bleed into today's work.
+- **One session per Telegram forum topic.** Point rex at a supergroup with
+  topics turned on and every topic becomes its own conversation, with its
+  own history and its own replies. See [Forum topics](#forum-topics).
 - **A skill system.** Reusable instruction packs in `workspace/skills/`.
   At session start rex prepends an index (name + description + path) to
   the system prompt; the agent reads the matching `SKILL.md` on demand.
@@ -69,6 +72,49 @@ What `rex` deliberately does *not* have:
   emerge from sessions and skills loaded into the workspace — not from a
   fixed cast of named personas (`code-reviewer`, `researcher`, `planner`,
   …). One brain with context, not a committee.
+
+## Forum topics
+
+Telegram supergroups can be turned into forums — a sidebar of topics, each
+its own thread. rex treats every topic as a separate conversation:
+
+```text
+Telegram supergroup
+│
+├── Topic: Authentication        → session A
+├── Topic: Database performance  → session B
+└── Topic: New API               → session C
+```
+
+Nothing said in one topic is visible in another: each has its own Claude
+session, its own history, and its own daily recycle. Replies land back in
+the topic they were asked in — final turn text, `rex user text|rich-text|
+voice|file`, typing indicators and scheduled callbacks alike.
+
+To use it: turn on **Topics** in your supergroup, add the bot, and set
+`telegram_chat_id` to the supergroup's id (`rex config setup`). Group
+privacy mode has to be off — in BotFather, `/setprivacy` → *Disable* — or
+the bot only ever sees commands and direct replies. The allow-list still
+applies: only the user IDs in `allowed_user_ids` are answered, wherever they
+write from. DMs keep working exactly as before and use the `main` session.
+
+Work the agent spawns out of a topic stays attached to it: a session started
+with `rex dispatch new` from inside a topic reports its results back into
+that same topic.
+
+The session target for a topic is `topic:<message_thread_id>`, which any
+command that takes a session accepts:
+
+```bash
+rex session list                 # tracked sessions + the topics bound to them
+rex session reset topic:77       # recycle one topic
+rex session reset all            # main plus every topic
+rex dispatch topic:77 "status?"  # prompt one topic's session
+rex callback create "Morning check" --schedule "0 9 * * *" --session topic:77
+```
+
+`/new` inside a topic resets that topic only. The General topic of a forum
+is the chat itself and maps to the `main` session.
 
 ## Other features
 
@@ -152,7 +198,7 @@ Daemon:     serve | start | stop | restart | status | logs [-f]
 Config:     config | config setup | config show
 Skills:     skills [list]
 Timeline:   timeline stats | rebuild | clear
-Sessions:   session reset | list | gc
+Sessions:   session reset [main|topic:<id>|all] | list | gc
 Dispatch:   dispatch <session> <message>
 Callbacks:  callback list | create "<prompt>" --schedule|--at … | remove <id>
 User:       user text|voice|file <…>
