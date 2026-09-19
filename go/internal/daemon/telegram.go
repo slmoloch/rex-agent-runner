@@ -164,7 +164,8 @@ func (d *Daemon) handleNewConversation(ctx context.Context, o origin) {
 		func() {
 			cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 			defer cancel()
-			_, _ = d.runInSessionFrom(cctx, prepareResetPrompt, o.target, "reset-prepare", "", &o)
+			_, _ = d.runInSessionFrom(cctx, PrepareResetPrompt(o.target, d.topicLabel(o.target)),
+				o.target, "reset-prepare", "", &o)
 		}()
 	}
 	d.sessions.Reset(o.target)

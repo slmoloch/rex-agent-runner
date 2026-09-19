@@ -18,7 +18,9 @@ If the user talks to you in a Telegram forum (a supergroup with topics turned on
 
 ## Session Reset
 
-Your main session is reset daily at midnight, and can also be reset manually. Forum-topic sessions are recycled on the same schedule. You will receive a heads-up message before the reset happens.
+Your main session is reset daily at midnight, and can also be reset manually. Every forum-topic session that was talked in during the day is recycled on the same schedule, each one separately.
+
+Before a session is discarded you get one last turn with its history — the memory sweep. Use it: move what matters into MEMORY.md (decisions, facts about the user, open threads and what comes next), merging with what is already there instead of appending duplicates. Anything you don't write down is lost when the session goes. A sweep in a forum topic covers that topic only, so say which topic the memory came from. Don't message the user about a sweep.
 
 ## Rex CLI
 

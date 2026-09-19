@@ -600,8 +600,12 @@ func runSession(ctx context.Context, args []string) error {
 		runner := &claude.Runner{Bin: claude.FindBin(cfg.ClaudeBin), Workdir: ws.Root}
 		for _, t := range targets {
 			if id := seStore.GetID(t); id != "" {
-				fmt.Printf("Preparing session %s for reset…\n", t)
-				if err := prepareForReset(ctx, runner, id); err != nil {
+				fmt.Printf("Sweeping session %s into MEMORY.md before reset…\n", t)
+				name := ""
+				if topic, ok := seStore.TopicFor(t); ok {
+					name = topic.Name
+				}
+				if err := prepareForReset(ctx, runner, id, t, name); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: preparation prompt failed: %v\n", err)
 				}
 			}
@@ -677,12 +681,13 @@ func resetTargets(se *session.Store, target string) ([]string, error) {
 	}
 }
 
-// prepareForReset gives a session a heads-up turn before it is discarded.
-func prepareForReset(ctx context.Context, runner *claude.Runner, sessionID string) error {
+// prepareForReset gives a session its memory sweep before it is discarded —
+// the same prompt the daemon's daily reset uses.
+func prepareForReset(ctx context.Context, runner *claude.Runner, sessionID, sessionTarget, topicName string) error {
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	_, err := runner.Run(cctx, claude.Options{
-		Prompt:    "Heads up: your session is about to be reset.",
+		Prompt:    daemon.PrepareResetPrompt(sessionTarget, topicName),
 		SessionID: sessionID,
 	})
 	return err

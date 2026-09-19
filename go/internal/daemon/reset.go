@@ -2,17 +2,47 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/slmoloch/rex-agent-runner/internal/session"
 )
 
-const prepareResetPrompt = "Heads up: your session is about to be reset."
+// PrepareResetPrompt builds the last turn a conversation gets before it is
+// discarded — the daily memory sweep. The session is about to lose its
+// history, so this is the moment to move anything worth keeping into
+// MEMORY.md. topicName may be empty; it is used to attribute what the sweep
+// writes, so memories from a forum topic don't read as if everything
+// happened in one conversation.
+func PrepareResetPrompt(sessionTarget, topicName string) string {
+	prompt := "Heads up: this session is about to be reset. This is your last turn with its " +
+		"history — after it, the conversation is gone.\n\n"
+	if session.IsTopicTarget(sessionTarget) {
+		prompt += "It serves the Telegram forum topic " + describeTopic(sessionTarget, topicName) +
+			". Attribute what you write to that topic.\n\n"
+	}
+	prompt += "Sweep the conversation into MEMORY.md now: decisions we reached, facts about the " +
+		"user, anything still open and what happens next. Merge with what is already there " +
+		"rather than appending duplicates, and leave out small talk. If nothing is worth " +
+		"keeping, change nothing.\n\n" +
+		"Don't message the user about this."
+	return prompt
+}
 
-// dailyResetLoop resets the main session every midnight. If the main session
-// is busy when midnight hits, it waits until the session becomes idle before
-// triggering the reset.
+// describeTopic names a topic for a prompt: its title when Telegram has told
+// us one, always with the target so the agent can address it later.
+func describeTopic(target, name string) string {
+	if name == "" {
+		return target
+	}
+	return fmt.Sprintf("%q (%s)", name, target)
+}
+
+// dailyResetLoop resets every conversation at midnight — the main session
+// and one per forum topic. If the main session is busy when midnight hits,
+// it waits until the session becomes idle before triggering the reset.
 func (d *Daemon) dailyResetLoop(ctx context.Context) {
 	slog.Info("daily reset scheduler started")
 	for {
@@ -40,13 +70,13 @@ func (d *Daemon) dailyResetLoop(ctx context.Context) {
 			}
 		}
 
-		// Preparation prompt on the outgoing session.
+		// Topics are swept first so the main session, restarted below, reads
+		// a MEMORY.md that already carries the day's topic conversations.
+		d.resetTopicSessions(ctx)
+
+		// Memory sweep on the outgoing main session.
 		if mainID := d.sessions.GetMainID(); mainID != "" {
-			func() {
-				cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-				defer cancel()
-				_, _ = d.runInSession(cctx, prepareResetPrompt, session.Main, "daily-reset-prepare", "")
-			}()
+			d.sweep(ctx, session.Main, "")
 		}
 
 		d.sessions.ResetMain()
@@ -60,44 +90,55 @@ func (d *Daemon) dailyResetLoop(ctx context.Context) {
 			defer cancel()
 			_, _ = d.runInSession(cctx, initPrompt, session.Main, "daily-reset", "")
 		}()
-
-		d.resetTopicSessions(ctx)
 	}
 }
 
-// resetTopicSessions recycles every forum-topic session at the daily reset,
-// the same way the main session is recycled. Topics that were active in the
-// last day get the heads-up prompt first; dormant ones are just cleared, so
-// a forum with many topics doesn't cost one LLM call per topic per night.
-// No seeding turn is run: the next message in a topic starts its session
-// with the topic context attached.
+// resetTopicSessions sweeps and recycles the forum topics that were talked
+// in since the last reset, one at a time — every sweep writes the same
+// MEMORY.md, so they must not run concurrently. No seeding turn is run: the
+// next message in a topic starts its session with the topic context
+// attached.
 func (d *Daemon) resetTopicSessions(ctx context.Context) {
-	for target, topic := range d.sessions.Topics() {
-		if topic.SessionID == "" {
-			continue
-		}
-		if d.sessions.IsRunning(topic.SessionID) {
-			slog.Info("daily reset: topic session is active, skipping", "topic", target)
-			continue
-		}
-		if recentlyActive(topic.LastActivity) {
-			func() {
-				cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-				defer cancel()
-				_, _ = d.runInSession(cctx, prepareResetPrompt, target, "daily-reset-prepare", "")
-			}()
-		}
+	topics := d.sessions.Topics()
+	sweep, busy := topicsToSweep(topics, d.sessions.IsRunning)
+	for _, target := range busy {
+		slog.Info("daily reset: topic session is active, leaving it for the next sweep",
+			"topic", target, "name", topics[target].Name)
+	}
+	for _, target := range sweep {
+		d.sweep(ctx, target, topics[target].Name)
 		d.sessions.Reset(target)
-		slog.Info("daily reset: topic session reset", "topic", target, "name", topic.Name)
+		slog.Info("daily reset: topic session reset", "topic", target, "name", topics[target].Name)
 	}
 }
 
-// recentlyActive reports whether an RFC3339 timestamp is within the last day.
-// An unparseable or missing stamp counts as stale.
-func recentlyActive(stamp string) bool {
-	t, err := time.Parse(time.RFC3339Nano, stamp)
-	if err != nil {
-		return false
+// sweep runs one memory-sweep turn in the given conversation.
+func (d *Daemon) sweep(ctx context.Context, sessionTarget, topicName string) {
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	_, _ = d.runInSession(cctx, PrepareResetPrompt(sessionTarget, topicName),
+		sessionTarget, "daily-reset-prepare", "")
+}
+
+// topicsToSweep splits the known topics into the ones to sweep now and the
+// ones to leave alone. A topic is swept iff it still holds a live session:
+// a reset clears that pointer, so a session id surviving until midnight is
+// exactly a topic that was discussed since the last sweep — and one whose
+// context is about to be discarded. Topics mid-turn are left for the next
+// sweep; their session, and so its history, lives on, so nothing is lost.
+// Both lists are sorted, which keeps a night's sweeps in a stable order.
+func topicsToSweep(topics map[string]session.Topic, isRunning func(string) bool) (sweep, busy []string) {
+	for target, topic := range topics {
+		switch {
+		case topic.SessionID == "":
+			continue
+		case isRunning(topic.SessionID):
+			busy = append(busy, target)
+		default:
+			sweep = append(sweep, target)
+		}
 	}
-	return time.Since(t) < 24*time.Hour
+	sort.Strings(sweep)
+	sort.Strings(busy)
+	return sweep, busy
 }

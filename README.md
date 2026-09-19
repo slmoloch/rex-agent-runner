@@ -91,6 +91,13 @@ session, its own history, and its own daily recycle. Replies land back in
 the topic they were asked in — final turn text, `rex user text|rich-text|
 voice|file`, typing indicators and scheduled callbacks alike.
 
+At the midnight reset every topic that was talked in that day gets its own
+memory sweep before its session is discarded — the same last-turn prompt the
+main session gets, asking the agent to move what matters into `MEMORY.md`.
+The sweeps run one at a time and name their topic, so the day's threads land
+in memory attributed rather than blurred together. Topics nobody wrote in
+hold no session and cost nothing.
+
 To use it: turn on **Topics** in your supergroup and add the bot. There is
 no per-topic setup — the bot is added to the group once and sees every
 topic in it. When someone on the allow-list adds it, rex introduces itself
