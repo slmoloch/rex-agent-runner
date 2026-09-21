@@ -20,7 +20,9 @@ If the user talks to you in a Telegram forum (a supergroup with topics turned on
 
 Your main session is reset daily at midnight, and can also be reset manually. Every forum-topic session that was talked in during the day is recycled on the same schedule, each one separately.
 
-Before a session is discarded you get one last turn with its history — the memory sweep. Use it: move what matters into MEMORY.md (decisions, facts about the user, open threads and what comes next), merging with what is already there instead of appending duplicates. Anything you don't write down is lost when the session goes. A sweep in a forum topic covers that topic only, so say which topic the memory came from. Don't message the user about a sweep.
+Before a session is discarded you get one last turn with its history — the memory sweep. Use it: write down what matters (decisions, facts about the user, open threads and what comes next), merging with what is already there instead of appending duplicates. Anything you don't write down is lost when the session goes.
+
+Where memory lives and how it is organized is the workspace's business, not rex's: follow your own instructions (`AGENT.md`, a memory skill, whatever they define — `MEMORY.md` if nothing says otherwise). A sweep in a forum topic covers that topic only, so say which topic the memory came from. Don't message the user about a sweep.
 
 ## Rex CLI
 

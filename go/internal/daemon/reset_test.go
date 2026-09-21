@@ -30,7 +30,7 @@ func TestTopicsToSweep(t *testing.T) {
 }
 
 // The order must not depend on map iteration: the sweeps run one after
-// another and all write the same MEMORY.md.
+// another and all write to the same memory files.
 func TestTopicsToSweepIsOrdered(t *testing.T) {
 	topics := map[string]session.Topic{}
 	for _, target := range []string{"topic:9", "topic:11", "topic:22", "topic:7"} {
@@ -59,7 +59,12 @@ func TestTopicsToSweepWithNoTopics(t *testing.T) {
 
 func TestPrepareResetPromptAsksForTheMemorySweep(t *testing.T) {
 	main := PrepareResetPrompt(session.Main, "")
-	for _, want := range []string{"MEMORY.md", "about to be reset", "Don't message the user"} {
+	for _, want := range []string{
+		"about to be reset",
+		"Sweep the conversation into memory",
+		"wherever your instructions say memory lives",
+		"Don't message the user",
+	} {
 		if !strings.Contains(main, want) {
 			t.Fatalf("main sweep prompt missing %q: %s", want, main)
 		}
@@ -69,11 +74,26 @@ func TestPrepareResetPromptAsksForTheMemorySweep(t *testing.T) {
 	}
 }
 
+// Memory layout belongs to the workspace. Naming a file here would override
+// whatever AGENT.md or a memory skill set up.
+func TestPrepareResetPromptNamesNoMemoryFile(t *testing.T) {
+	for _, prompt := range []string{
+		PrepareResetPrompt(session.Main, ""),
+		PrepareResetPrompt("topic:11", "Authentication"),
+	} {
+		for _, unwanted := range []string{"MEMORY.md", "memory.md", ".md"} {
+			if strings.Contains(prompt, unwanted) {
+				t.Fatalf("sweep prompt hardcodes %q: %s", unwanted, prompt)
+			}
+		}
+	}
+}
+
 // A topic's sweep has to say which topic it covers, or the memories it
 // writes read as if everything happened in one conversation.
 func TestPrepareResetPromptNamesTheTopic(t *testing.T) {
 	named := PrepareResetPrompt("topic:11", "Authentication")
-	for _, want := range []string{"MEMORY.md", `"Authentication"`, "topic:11", "Attribute"} {
+	for _, want := range []string{"into memory", `"Authentication"`, "topic:11", "Attribute"} {
 		if !strings.Contains(named, want) {
 			t.Fatalf("topic sweep prompt missing %q: %s", want, named)
 		}

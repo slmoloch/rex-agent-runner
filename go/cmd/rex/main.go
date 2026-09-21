@@ -600,7 +600,7 @@ func runSession(ctx context.Context, args []string) error {
 		runner := &claude.Runner{Bin: claude.FindBin(cfg.ClaudeBin), Workdir: ws.Root}
 		for _, t := range targets {
 			if id := seStore.GetID(t); id != "" {
-				fmt.Printf("Sweeping session %s into MEMORY.md before reset…\n", t)
+				fmt.Printf("Sweeping session %s into memory before reset…\n", t)
 				name := ""
 				if topic, ok := seStore.TopicFor(t); ok {
 					name = topic.Name

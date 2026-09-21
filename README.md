@@ -93,10 +93,12 @@ voice|file`, typing indicators and scheduled callbacks alike.
 
 At the midnight reset every topic that was talked in that day gets its own
 memory sweep before its session is discarded — the same last-turn prompt the
-main session gets, asking the agent to move what matters into `MEMORY.md`.
-The sweeps run one at a time and name their topic, so the day's threads land
-in memory attributed rather than blurred together. Topics nobody wrote in
-hold no session and cost nothing.
+main session gets, asking the agent to write down what matters before the
+history goes. Where that lands is the workspace's call: the prompt defers to
+your own instructions (`AGENT.md`, a memory skill, the `MEMORY.md` that `rex
+init` scaffolds) rather than naming a file. The sweeps run one at a time and
+name their topic, so the day's threads land in memory attributed rather than
+blurred together. Topics nobody wrote in hold no session and cost nothing.
 
 To use it: turn on **Topics** in your supergroup and add the bot. There is
 no per-topic setup — the bot is added to the group once and sees every

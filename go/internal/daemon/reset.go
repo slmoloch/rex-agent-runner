@@ -12,10 +12,15 @@ import (
 
 // PrepareResetPrompt builds the last turn a conversation gets before it is
 // discarded — the daily memory sweep. The session is about to lose its
-// history, so this is the moment to move anything worth keeping into
-// MEMORY.md. topicName may be empty; it is used to attribute what the sweep
-// writes, so memories from a forum topic don't read as if everything
-// happened in one conversation.
+// history, so this is the moment to write down anything worth keeping.
+//
+// Where that goes is deliberately not named here: memory layout belongs to
+// the workspace (AGENT.md, a memory skill, the MEMORY.md `rex init`
+// scaffolds), and hardcoding a path would override whatever the user set up.
+//
+// topicName may be empty; it is used to attribute what the sweep writes, so
+// memories from a forum topic don't read as if everything happened in one
+// conversation.
 func PrepareResetPrompt(sessionTarget, topicName string) string {
 	prompt := "Heads up: this session is about to be reset. This is your last turn with its " +
 		"history — after it, the conversation is gone.\n\n"
@@ -23,10 +28,11 @@ func PrepareResetPrompt(sessionTarget, topicName string) string {
 		prompt += "It serves the Telegram forum topic " + describeTopic(sessionTarget, topicName) +
 			". Attribute what you write to that topic.\n\n"
 	}
-	prompt += "Sweep the conversation into MEMORY.md now: decisions we reached, facts about the " +
-		"user, anything still open and what happens next. Merge with what is already there " +
-		"rather than appending duplicates, and leave out small talk. If nothing is worth " +
-		"keeping, change nothing.\n\n" +
+	prompt += "Sweep the conversation into memory now, wherever your instructions say memory " +
+		"lives and in the layout they define: decisions we reached, facts about the user, " +
+		"anything still open and what happens next. Merge with what is already there rather " +
+		"than appending duplicates, and leave out small talk. If nothing is worth keeping, " +
+		"change nothing.\n\n" +
 		"Don't message the user about this."
 	return prompt
 }
@@ -71,7 +77,7 @@ func (d *Daemon) dailyResetLoop(ctx context.Context) {
 		}
 
 		// Topics are swept first so the main session, restarted below, reads
-		// a MEMORY.md that already carries the day's topic conversations.
+		// a memory file that already carries the day's topic conversations.
 		d.resetTopicSessions(ctx)
 
 		// Memory sweep on the outgoing main session.
@@ -94,8 +100,8 @@ func (d *Daemon) dailyResetLoop(ctx context.Context) {
 }
 
 // resetTopicSessions sweeps and recycles the forum topics that were talked
-// in since the last reset, one at a time — every sweep writes the same
-// MEMORY.md, so they must not run concurrently. No seeding turn is run: the
+// in since the last reset, one at a time — the sweeps write to the same
+// memory files, so they must not run concurrently. No seeding turn is run: the
 // next message in a topic starts its session with the topic context
 // attached.
 func (d *Daemon) resetTopicSessions(ctx context.Context) {
